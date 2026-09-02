@@ -26,10 +26,27 @@ entry.
 
 ## Sprint 1 — control plane core
 
-- [ ] **001 Server bootstrap** — `docs/specs/001-server-bootstrap.md`
+- [x] **001 Server bootstrap** — `docs/specs/001-server-bootstrap.md`
       Config load + defaults + validation, SQLite + migrations, key and
       TLS generation, hub interface, listeners, `--check`, clean
       shutdown, netns boot test.
+      - New package `internal/server` holds the bootstrap; `cmd/thawr`
+        only parses flags and signals.
+      - Userspace WireGuard is configured through wireguard-go's
+        in-process IPC (`IpcSet`), not a UAPI socket; the kernel adapter
+        uses wgctrl. Windows returns `ErrPlatformUnsupported` until 003.
+      - Policy loading is syntax-only (version 1, accept rules, known
+        keys); spec 006 extends `policy.Load` in place.
+      - STUN sockets are bound and drained; `/relay` answers 501.
+      - Store tests use a temp-file DB, not the in-memory DSN.
+      - `go.mod` requires Go 1.25 (pulled in by modernc sqlite and
+        wireguard-go); CI uses `go-version-file`, so it follows.
+      - `TestMigrateFromV1` waits for a second migration to exist.
+      - The netns integration test skips without root and iproute2; it
+        did not run in the development container (no `ip` binary). The
+        real binary was booted manually there with userspace WireGuard
+        and verified: files and modes, status over the socket, SIGTERM
+        exit 0.
 - [ ] **002 Peer enrollment** — `docs/specs/002-peer-enrollment.md`
       Users (argon2id), one-time tokens, `Enroll` RPC, IP allocator,
       peer registry, admin CLI + REST + UI list/create, `client up`

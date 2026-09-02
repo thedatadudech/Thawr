@@ -52,21 +52,23 @@ flowchart LR
 
 ## 2. Packages
 
-Dependencies point downward only. `cmd/thawr` wires everything; nothing
-below `cmd` imports a sibling that is not listed here.
+Dependencies point downward only. `cmd/thawr` parses flags and hands
+the config to `internal/server`, which wires everything; nothing below
+`cmd` imports a sibling that is not listed here.
 
 ```mermaid
 flowchart TD
-  CMD[cmd/thawr] --> API[internal/api]
+  CMD[cmd/thawr] --> SRV[internal/server]
   CMD --> CFG[internal/config]
-  CMD --> RELAY[internal/relay]
-  CMD --> WG[internal/wg]
-  CMD --> WEB[web]
+  SRV --> API[internal/api]
+  SRV --> RELAY[internal/relay]
+  SRV --> WG[internal/wg]
+  SRV --> WEB[web]
+  SRV --> STORE[internal/store]
   API --> CTRL[internal/control]
   API --> RELAY
-  CTRL --> STORE[internal/store]
+  CTRL --> STORE
   RELAY --> CTRL
-  CMD --> STORE
 ```
 
 | Package | Single responsibility | Exposes | Depends on |
@@ -74,9 +76,10 @@ flowchart TD
 | `internal/config` | Load one YAML file, apply defaults, validate | `Load(path) (*Config, error)`, `Config` struct, `Default()` | stdlib, yaml |
 | `internal/store` | Persist peers, users, tokens, policy generation in SQLite; run migrations | `Open(dsn) (*Store, error)`, `Store.Peers()`, `Store.Users()`, `Store.Tokens()`, `Store.Meta()`, each a small interface with ctx-first methods | `modernc.org/sqlite` |
 | `internal/control` | Everything that decides: enrollment, registry, key distribution (netmap), policy compilation, endpoint tracking, IP allocation | `Enroller`, `Registry`, `Policy` (parse + compile), `NetMapBuilder`, `EndpointTable`, `Allocator` | `internal/store` |
-| `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface, `NewKernel()`, `NewUserspace()`, `Filter` interface | `wgctrl`, `wireguard-go`, netlink / nftables |
+| `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface, `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables |
 | `internal/relay` | Forward opaque packets between authenticated peers; local UDP proxy on the client | `Server`, `Client`, frame codec | `internal/control` (for auth + visibility check via a small interface) |
 | `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, protobuf under `internal/api/proto` | `internal/control`, `internal/relay` |
+| `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling | `main` | all of the above |
 
@@ -333,7 +336,8 @@ long as endpoints have not changed.
 | `github.com/spf13/cobra` | CLI subcommands | Apache-2.0 |
 
 All pure Go. The binary builds with `CGO_ENABLED=0` on Linux, macOS, and
-Windows.
+Windows with Go 1.25 or newer (the minimum required by `modernc.org/sqlite`
+and `wireguard-go`).
 
 ## 9. Non-goals restated
 

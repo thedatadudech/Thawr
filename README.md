@@ -55,7 +55,7 @@ Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 
 ## Building
 
-Requires Go 1.24 or newer. No CGO, no Node.
+Requires Go 1.25 or newer. No CGO, no Node.
 
 ```
 make build      # bin/thawr
