@@ -43,7 +43,7 @@ func newNetns(t *testing.T, suffix string) *netns {
 	}
 	run(t, "ip", "netns", "add", name)
 	ns := &netns{name: name}
-	t.Cleanup(func() { _ = exec.Command("ip", "netns", "del", name).Run() })
+	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "ip", "netns", "del", name).Run() })
 	ns.run(t, "ip", "link", "set", "lo", "up")
 	return ns
 }
@@ -65,7 +65,7 @@ func (n *netns) run(t *testing.T, name string, args ...string) string {
 
 func run(t *testing.T, name string, args ...string) {
 	t.Helper()
-	if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), name, args...).CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
 }
@@ -79,7 +79,7 @@ func thawrBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin", "thawr")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/thawr")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "./cmd/thawr")
 	build.Dir = root
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := build.CombinedOutput(); err != nil {

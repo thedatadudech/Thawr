@@ -48,6 +48,9 @@ linters:
         linters: [forbidigo]
       - path: _test\.go$
         linters: [gosec, forbidigo, errcheck]
+      # Integration helpers launch ip/go subprocesses by design.
+      - path: ^tests/
+        linters: [gosec]
 
 formatters:
   enable:
