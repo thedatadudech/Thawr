@@ -1,0 +1,157 @@
+package config
+
+import (
+	"errors"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func noEnv(string) string { return "" }
+
+func TestDefaults(t *testing.T) {
+	cfg, err := Parse([]byte("public_addr: vpn.example.com\n"), noEnv)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := Default()
+	want.PublicAddr = "vpn.example.com"
+	checks := []struct{ name, got, want string }{
+		{"data_dir", cfg.DataDir, want.DataDir},
+		{"listen.https", cfg.Listen.HTTPS, want.Listen.HTTPS},
+		{"listen.wireguard", cfg.Listen.WireGuard, want.Listen.WireGuard},
+		{"listen.stun", strings.Join(cfg.Listen.STUN, ","), strings.Join(want.Listen.STUN, ",")},
+		{"overlay.cidr", cfg.Overlay.CIDR, want.Overlay.CIDR},
+		{"overlay.interface", cfg.Overlay.Interface, want.Overlay.Interface},
+		{"tls.mode", cfg.TLS.Mode, TLSModeSelfSigned},
+		{"policy_file", cfg.PolicyFile, want.PolicyFile},
+		{"admin_socket", cfg.AdminSocket, filepath.Join(DefaultDataDir, "admin.sock")},
+		{"log.level", cfg.Log.Level, "info"},
+		{"log.format", cfg.Log.Format, "text"},
+		{"min_client_version", cfg.MinClientVersion, ""},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+func TestAdminSocketFollowsDataDir(t *testing.T) {
+	cfg, err := Parse([]byte("public_addr: vpn.example.com\ndata_dir: /srv/thawr\n"), noEnv)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := cfg.AdminSocket, filepath.Join("/srv/thawr", "admin.sock"); got != want {
+		t.Errorf("admin_socket: got %q, want %q", got, want)
+	}
+}
+
+func TestDerivedValues(t *testing.T) {
+	cfg, err := Parse([]byte("public_addr: vpn.example.com:8443\n"), noEnv)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := cfg.PublicHost(); got != "vpn.example.com" {
+		t.Errorf("PublicHost: %q", got)
+	}
+	if got, want := cfg.HubAddr(), netip.MustParsePrefix("100.64.0.1/10"); got != want {
+		t.Errorf("HubAddr: got %s, want %s", got, want)
+	}
+	if got := cfg.HubEndpoint(); got != "vpn.example.com:51820" {
+		t.Errorf("HubEndpoint: %q", got)
+	}
+	if got, want := cfg.OverlayPrefix(), netip.MustParsePrefix("100.64.0.0/10"); got != want {
+		t.Errorf("OverlayPrefix: got %s, want %s", got, want)
+	}
+}
+
+func TestValidate(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want []string // substrings that must appear in the error
+	}{
+		{"missing public_addr", "data_dir: /tmp/x\n", []string{"public_addr: required"}},
+		{"bad public port", "public_addr: 'vpn:abc'\n", []string{"public_addr: port"}},
+		{"bad cidr", "public_addr: a\noverlay:\n  cidr: nope\n", []string{"overlay.cidr"}},
+		{"ipv6 cidr", "public_addr: a\noverlay:\n  cidr: fd00::/64\n", []string{"only IPv4"}},
+		{"tiny cidr", "public_addr: a\noverlay:\n  cidr: 10.0.0.0/31\n", []string{"/30 or larger"}},
+		{"long interface", "public_addr: a\noverlay:\n  interface: abcdefghijklmnopq\n", []string{"overlay.interface"}},
+		{"bad listen", "public_addr: a\nlisten:\n  https: '443'\n", []string{"listen.https"}},
+		{"no stun", "public_addr: a\nlisten:\n  stun: []\n", []string{"listen.stun: at least one"}},
+		{"three stun", "public_addr: a\nlisten:\n  stun: [':1', ':2', ':3']\n", []string{"at most two"}},
+		{"tls file without files", "public_addr: a\ntls:\n  mode: file\n", []string{"tls.cert_file", "tls.key_file"}},
+		{"tls bad mode", "public_addr: a\ntls:\n  mode: acme\n", []string{"tls.mode"}},
+		{"bad log level", "public_addr: a\nlog:\n  level: loud\n", []string{"log.level"}},
+		{"bad log format", "public_addr: a\nlog:\n  format: xml\n", []string{"log.format"}},
+		{"bad min version", "public_addr: a\nmin_client_version: v1\n", []string{"min_client_version"}},
+		{"unknown key", "public_addr: a\nbogus: 1\n", []string{"bogus"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml), noEnv)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q does not contain %q", err.Error(), w)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateCollectsAllProblems(t *testing.T) {
+	_, err := Parse([]byte("overlay:\n  cidr: nope\nlog:\n  level: loud\n"), noEnv)
+	var verr *ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("got %T, want *ValidationError", err)
+	}
+	if len(verr.Problems) != 3 {
+		t.Errorf("got %d problems, want 3: %v", len(verr.Problems), verr.Problems)
+	}
+}
+
+func TestEnvOverride(t *testing.T) {
+	env := func(k string) string {
+		if k == EnvLogLevel {
+			return "debug"
+		}
+		return ""
+	}
+	cfg, err := Parse([]byte("public_addr: a\nlog:\n  level: warn\n"), noEnv)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Log.Level != "warn" {
+		t.Fatalf("file value not applied: %q", cfg.Log.Level)
+	}
+	cfg, err = Parse([]byte("public_addr: a\nlog:\n  level: warn\n"), env)
+	if err != nil {
+		t.Fatalf("Parse with env: %v", err)
+	}
+	if cfg.Log.Level != "debug" {
+		t.Errorf("env override: got %q, want debug", cfg.Log.Level)
+	}
+}
+
+func TestLoadExampleConfig(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "config", "server.example.yaml"))
+	if err != nil {
+		t.Fatalf("Load example: %v", err)
+	}
+	if cfg.PublicAddr != "vpn.example.com" {
+		t.Errorf("public_addr: %q", cfg.PublicAddr)
+	}
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("got %v, want ErrNotExist", err)
+	}
+}
