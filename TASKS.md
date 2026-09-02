@@ -21,6 +21,11 @@ entry.
       - `cmd/thawr` already wires cobra with `server`, `client`, `admin`
         and `version`; the first three return "not implemented" until
         their specs land.
+- [ ] `.github/workflows/ci.yml` must be committed by a human: the
+      GitHub App used by Claude Code sessions lacks the `workflows`
+      permission and GitHub refuses the push. The file was delivered in
+      the session that did the scaffold; CI jobs: lint, race tests on
+      three OSes, CGO-free cross-builds, govulncheck.
 
 ## Sprint 1 — control plane core
 
