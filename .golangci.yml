@@ -31,7 +31,7 @@ linters:
     revive:
       rules:
         - name: exported
-          arguments: ["checkPrivateReceivers", "disableStutteringCheck"]
+          arguments: ["disableStutteringCheck"]
         - name: package-comments
     gosec:
       excludes:
