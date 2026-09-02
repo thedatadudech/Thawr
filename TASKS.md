@@ -11,11 +11,16 @@ entry.
 
 ## Phase 1 — Scaffold
 
-- [ ] `go.mod`, `Makefile`, `.gitignore`, `.golangci.yml`, `README.md`,
+- [x] `go.mod`, `Makefile`, `.gitignore`, `.golangci.yml`, `README.md`,
       `LICENSE` (Apache-2.0, replacing the initial MIT file), `NOTICE`,
       `.github/workflows/ci.yml` (build, lint, test on Linux, macOS,
       Windows), `config/server.example.yaml`, `doc.go` in every package.
       `make build lint test` green. Commit `chore: initial scaffold`.
+      - `make test` runs with `CGO_ENABLED=1` because the race runtime
+        needs cgo; `make build` and CI cross-builds stay `CGO_ENABLED=0`.
+      - `cmd/thawr` already wires cobra with `server`, `client`, `admin`
+        and `version`; the first three return "not implemented" until
+        their specs land.
 
 ## Sprint 1 — control plane core
 
@@ -62,12 +67,10 @@ entry.
 - Workload / agent identity: short-lived tokens issued by CI or an
   orchestrator, using the existing `kind: agent`.
 
-## Open decisions awaiting owner review
+## Decisions reviewed by the owner (2026-09-02: all accepted as written)
 
-Answers change the docs above; none block Phase 1 except D1.
-
-- D1 License file: repository has MIT; brief and ADR 0003 say
-  Apache-2.0. Phase 1 replaces `LICENSE` unless told otherwise.
+- D1 License: Apache-2.0 confirmed; Phase 1 replaced the initial MIT
+  `LICENSE` with the canonical Apache-2.0 text.
 - D2 STUN: copy `tailscale.com/net/stun` into `internal/stun`
   (BSD-3, ~400 lines, no transitive deps) rather than importing the
   `tailscale.com` module (large dependency tree). Alternative:
