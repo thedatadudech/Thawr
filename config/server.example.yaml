@@ -1,0 +1,29 @@
+# Thawr server configuration.
+# Only `public_addr` is required; every other key is shown with its default.
+# Spec: docs/specs/001-server-bootstrap.md
+
+public_addr: vpn.example.com     # host or host:port that peers can reach
+data_dir: /var/lib/thawr         # SQLite DB, WireGuard key, TLS files, admin socket
+
+listen:
+  https: ":443"                  # gRPC + REST + admin UI + relay
+  stun: [":3478", ":3479"]       # two ports so clients can detect symmetric NAT
+  wireguard: ":51820"            # server's own WireGuard interface (hub)
+
+overlay:
+  cidr: 100.64.0.0/10
+  interface: thawr0
+
+tls:
+  mode: self-signed              # self-signed | file
+  cert_file: ""                  # with mode: file
+  key_file: ""                   # with mode: file
+
+policy_file: /etc/thawr/policy.yaml   # YAML ACLs, default deny when absent
+admin_socket: /var/lib/thawr/admin.sock
+
+log:
+  level: info                    # debug | info | warn | error
+  format: text                   # text | json
+
+min_client_version: ""           # default: the server's own major.minor

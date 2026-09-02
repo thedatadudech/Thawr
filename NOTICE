@@ -1,0 +1,11 @@
+Thawr
+Copyright 2026 Markus Clauss (Abdullah Isa) and contributors
+
+This product is licensed under the Apache License, Version 2.0
+(see LICENSE).
+
+Third-party code included in this repository under its own license:
+
+  internal/stun (to be added in spec 004)
+    Copied from tailscale.com/net/stun, Copyright (c) Tailscale Inc & AUTHORS,
+    BSD-3-Clause. The original license header is preserved in each file.

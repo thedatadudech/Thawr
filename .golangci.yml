@@ -1,0 +1,59 @@
+# golangci-lint v2 configuration. `make lint` runs this; CI runs the same.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint       # wrapped error comparisons
+    - errname         # error type naming
+    - gosec           # security checks (no weak randomness, file modes)
+    - misspell
+    - nolintlint
+    - revive          # doc comments on exported identifiers
+    - unconvert
+    - unparam
+    - copyloopvar
+    - bodyclose
+    - noctx           # HTTP requests without context
+    - forbidigo       # no fmt.Print* debugging in non-CLI packages
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments: ["checkPrivateReceivers", "disableStutteringCheck"]
+        - name: package-comments
+    gosec:
+      excludes:
+        - G304 # file paths come from validated config
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print.*$
+          msg: use log/slog or the CLI's io.Writer
+      exclude-godoc-examples: true
+  exclusions:
+    rules:
+      # CLI subcommands write to stdout by design.
+      - path: ^cmd/
+        linters: [forbidigo]
+      - path: _test\.go$
+        linters: [gosec, forbidigo, errcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/thedatadudech/thawr

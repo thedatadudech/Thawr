@@ -1,0 +1,21 @@
+# Thawr ACL policy. Default deny: peers with no matching rule cannot see
+# each other. Spec: docs/specs/006-acl-policy.md
+version: 1
+
+groups:
+  admins: [markus]
+  devs: [alice, bob]
+
+tagOwners:
+  tag:prod: [group:admins]
+
+acls:
+  - action: accept
+    src: [group:devs]
+    dst: ["tag:prod:22,443"]
+  - action: accept
+    src: [group:admins]
+    dst: ["*:*"]
+  - action: accept
+    src: ["*"]
+    dst: ["self:*"]

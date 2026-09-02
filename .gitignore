@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local state and secrets (never commit)
+*.key
+*.pem
+*.db
+*.db-wal
+*.db-shm
+/data/
+.env
+*.local.yaml
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
