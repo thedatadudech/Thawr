@@ -23,6 +23,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/config"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/policy"
+	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/stun"
 	"github.com/thedatadudech/thawr/internal/wg"
@@ -76,6 +77,7 @@ type Server struct {
 	endpoints *control.EndpointTable
 	paths     *control.PathTable
 	netmaps   *control.NetMapBuilder
+	relay     *relay.Server
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -217,7 +219,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths,
-		Join: s.JoinInfo(), Sessions: s.sessions,
+		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay,
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {
@@ -480,6 +482,10 @@ func (s *Server) shutdown(servers ...*http.Server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	var errs []error
+	if s.relay != nil {
+		// Hijacked relay connections are not tracked by the HTTP servers.
+		s.relay.Close()
+	}
 	for _, srv := range servers {
 		if err := srv.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("server: shutdown: %w", err))
@@ -510,6 +516,9 @@ func (s *Server) Status(ctx context.Context) (api.Status, error) {
 		PeerCount:      count,
 		TLSFingerprint: s.tlsFingerprint,
 		HubPublicKey:   s.hubKey.PublicKey().String(),
+	}
+	if s.relay != nil {
+		st.Relay = s.relay.Stats()
 	}
 	if s.hub != nil {
 		st.NetmapGeneration = s.hub.Generation()
@@ -554,6 +563,8 @@ func (s *Server) buildServices(ctx context.Context) error {
 	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now)
 	s.sessions = api.NewSessions(s.deps.Now)
+	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, control.OwnerVisibility{}, hub.Generation)},
+		relay.ServerOptions{MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Now: s.deps.Now, Logger: s.log})
 	s.netmaps = control.NewNetMapBuilder(s.st, control.OwnerVisibility{}, s.endpoints, hub, control.HubConfig{
 		PublicKey: s.hubKey.PublicKey().String(),
 		Endpoint:  s.cfg.HubEndpoint(),
@@ -564,8 +575,18 @@ func (s *Server) buildServices(ctx context.Context) error {
 	return nil
 }
 
-// followRegistry keeps the hub WireGuard interface's peer list equal to
-// the registered peers, rebuilding it on every hub wake-up.
+// keyVisibility adapts control.KeyVisibility to the relay's key type.
+type keyVisibility struct {
+	kv *control.KeyVisibility
+}
+
+func (v keyVisibility) Visible(ctx context.Context, src, dst relay.Key) (bool, error) {
+	return v.kv.Visible(ctx, wg.Key(src).String(), wg.Key(dst).String())
+}
+
+// followRegistry keeps the hub WireGuard interface's peer list and the
+// relay's sessions in step with the registered peers, on every hub
+// wake-up.
 func (s *Server) followRegistry(ctx context.Context) {
 	wake, unsubscribe := s.hub.Subscribe("hub-device")
 	defer unsubscribe()
@@ -573,12 +594,26 @@ func (s *Server) followRegistry(ctx context.Context) {
 		if err := s.configureHub(ctx); err != nil && ctx.Err() == nil {
 			s.log.Error("hub device update", "err", err)
 		}
+		s.pruneRelay(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-wake:
 		}
 	}
+}
+
+// pruneRelay closes relay sessions of peers no longer registered.
+func (s *Server) pruneRelay(ctx context.Context) {
+	peers, err := s.st.Peers().List(ctx)
+	if err != nil {
+		return
+	}
+	keep := make(map[string]bool, len(peers))
+	for _, p := range peers {
+		keep[p.PublicKey] = true
+	}
+	s.relay.Prune(func(k relay.Key) bool { return keep[wg.Key(k).String()] })
 }
 
 // configureHub applies the full hub configuration: every registered
