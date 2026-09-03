@@ -30,6 +30,7 @@ make test          # go test -race -count=1 ./...
 make lint          # gofmt -l . ; go vet ./... ; golangci-lint run
 make run-server    # go run ./cmd/thawr server --config config/server.example.yaml
 make run-client    # go run ./cmd/thawr client up --server https://127.0.0.1:8443 --token $THAWR_TOKEN
+                   # (enrols when needed, then runs the sync daemon; client status|down|rotate-key talk to its socket)
 make integration   # go test -race -tags integration ./tests/... (Linux, needs CAP_NET_ADMIN)
 make proto         # regenerate gRPC/protobuf code (buf + plugins via go run, nothing to install)
 ```
@@ -48,7 +49,7 @@ internal/wg/        WireGuard adapter: kernel (wgctrl) and wireguard-go
 internal/store/     SQLite persistence and embedded SQL migrations
 internal/api/       gRPC (client<->server) and REST (admin UI) handlers
 internal/config/    YAML loading, validation, defaults
-internal/client/    device side: state dir, TLS pinning, enrollment (daemon in spec 003)
+internal/client/    device side: state dir, TLS pinning, enrollment, sync daemon, local socket API
 internal/server/    composes the server: bootstrap order, readiness, reload, shutdown
 web/                admin UI: plain HTML/JS, embedded via embed.FS
 docs/               vision, architecture, ADRs, threat model, specs

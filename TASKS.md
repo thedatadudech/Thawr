@@ -75,10 +75,37 @@ entry.
       - The two-client netns integration test skips without root and
         iproute2 (not run in the development container); the CLI flow
         was exercised manually against the real binary instead.
-- [ ] **003 Key distribution** — `docs/specs/003-key-distribution.md`
+- [x] **003 Key distribution** — `docs/specs/003-key-distribution.md`
       Netmap builder, `Sync` stream, endpoint table, `wg.Device`
       kernel + userspace adapters, client daemon with cached netmap,
       canonical integration test `TestEncryptedPingTwoClients`.
+      - Visibility until spec 006: same non-empty owner, behind
+        `control.Visibility`. Static peers appear as hub allowed IPs.
+      - The server always sends a full netmap on connect; the netmap
+        generation is the hub's in-memory sequence (persisted generation
+        plus endpoint/presence changes), bumped at change time and
+        delivered after a 200 ms coalesce.
+      - The client replaces the whole peer set per netmap
+        (`wg.Device.Configure` with ReplacePeers) instead of diffing.
+      - Client address carries the overlay prefix length (on-link route);
+        the listen port is random once and persisted in `state.json`.
+      - Endpoint reports carry local interface addresses only; the
+        client uses a peer's first candidate until spec 004's path state
+        machine. The hub interface holds every registered peer.
+      - Presence: online while a `Sync` stream is open plus 90 s grace,
+        swept every 5 s; keepalive netmaps every 30 s.
+      - Windows address setup uses `netsh` (compile-checked, untested;
+        `docs/TESTING.md`). The client socket is a Unix socket on every
+        platform.
+      - gRPC shutdown is bounded (graceful for 2.5 s, then forced)
+        because open Sync streams never end on their own.
+      - wireguard-go's Errorf maps to warnings; "no known endpoint" to
+        debug.
+      - Verified on this box with the real binary: server plus two
+        userspace-WireGuard clients on one host completed handshakes with
+        the hub and each other, deletion emptied the other client's peer
+        list within 2 s, key rotation and `down --forget` worked. The
+        netns ping test skips here (no `ip` binary).
 
 ## Sprint 2 — connectivity, policy, UX
 

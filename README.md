@@ -35,7 +35,7 @@ tracked in `TASKS.md`.
 - Phones use the official WireGuard app via a QR code.
 - Nothing phones home. It starts and runs with no internet access.
 
-## Quick start (server bootstrap and enrollment work; connectivity lands with spec 003)
+## Quick start (server, enrollment and key distribution work; NAT traversal lands with spec 004)
 
 Server, on a host with a public address:
 
@@ -53,9 +53,14 @@ thawr admin token create --owner markus --kind human
 Client, on any machine:
 
 ```
-thawr client up --server https://vpn.example.com --token thawr_... --fingerprint sha256:...
+sudo thawr client up --server https://vpn.example.com --token thawr_... --fingerprint sha256:...
 thawr client status
 ```
+
+`client up` enrols the device on first run and then keeps the WireGuard
+interface in sync with the server until stopped. Peers that can reach
+each other directly (same LAN, public addresses) talk right away; NAT
+traversal and the relay follow in the next specs.
 
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 (STUN), UDP 51820 (WireGuard hub for phones).
