@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -17,11 +18,12 @@ import (
 // userspaceDevice runs wireguard-go on a TUN interface and configures it
 // through the in-process IPC API, so no UAPI socket is needed.
 type userspaceDevice struct {
-	name string
-	mtu  int
-	dev  *device.Device
-	bind *stunBind
-	log  *slog.Logger
+	name   string
+	mtu    int
+	dev    *device.Device
+	bind   *stunBind
+	filter *packetFilter
+	log    *slog.Logger
 
 	mu     sync.Mutex
 	closed bool
@@ -31,10 +33,12 @@ func openUserspace(_ context.Context, opts Options) (Device, error) {
 	if err := platformSupported(); err != nil {
 		return nil, err
 	}
-	tdev, err := tun.CreateTUN(opts.Name, opts.MTU)
+	rawTUN, err := tun.CreateTUN(opts.Name, opts.MTU)
 	if err != nil {
 		return nil, fmt.Errorf("wg: create tun %q: %w", opts.Name, err)
 	}
+	filter := newPacketFilter(time.Now)
+	tdev := &filteredTUN{Device: rawTUN, filter: filter}
 	name, err := tdev.Name()
 	if err != nil {
 		_ = tdev.Close()
@@ -58,7 +62,49 @@ func openUserspace(_ context.Context, opts Options) (Device, error) {
 	}
 	bind := newSTUNBind(conn.NewDefaultBind())
 	dev := device.NewDevice(tdev, bind, logger)
-	return &userspaceDevice{name: name, mtu: opts.MTU, dev: dev, bind: bind, log: log}, nil
+	return &userspaceDevice{name: name, mtu: opts.MTU, dev: dev, bind: bind, filter: filter, log: log}, nil
+}
+
+// SetFilter installs the receiver-side filter between the device and
+// the TUN.
+func (u *userspaceDevice) SetFilter(_ context.Context, set FilterSet) error {
+	u.filter.Set(set)
+	return nil
+}
+
+// FilterStats reports the userspace filter counters.
+func (u *userspaceDevice) FilterStats() FilterStats { return u.filter.Stats() }
+
+// filteredTUN applies the packet filter: packets written toward the TUN
+// (inbound from WireGuard) must pass, packets read from the TUN
+// (outbound) record flows so their replies pass.
+type filteredTUN struct {
+	tun.Device
+	filter *packetFilter
+}
+
+func (t *filteredTUN) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	n, err := t.Device.Read(bufs, sizes, offset)
+	for i := range n {
+		t.filter.Outbound(bufs[i][offset : offset+sizes[i]])
+	}
+	return n, err
+}
+
+func (t *filteredTUN) Write(bufs [][]byte, offset int) (int, error) {
+	kept := make([][]byte, 0, len(bufs))
+	for _, b := range bufs {
+		if t.filter.Inbound(b[offset:]) {
+			kept = append(kept, b)
+		}
+	}
+	if len(kept) == 0 {
+		return len(bufs), nil
+	}
+	if _, err := t.Device.Write(kept, offset); err != nil {
+		return 0, err
+	}
+	return len(bufs), nil
 }
 
 func (u *userspaceDevice) Configure(ctx context.Context, cfg Config) error {
