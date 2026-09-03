@@ -25,7 +25,20 @@ type kernelDevice struct {
 
 	mu     sync.Mutex
 	closed bool
+
+	nft nftFilter
 }
+
+// SetFilter installs the receiver-side filter with nftables.
+func (k *kernelDevice) SetFilter(ctx context.Context, set FilterSet) error {
+	if set.Interface == "" {
+		set.Interface = k.name
+	}
+	return k.nft.SetFilter(ctx, set)
+}
+
+// FilterStats reports the nftables counters.
+func (k *kernelDevice) FilterStats() FilterStats { return k.nft.FilterStats() }
 
 func openKernel(_ context.Context, opts Options) (Device, error) {
 	attrs := netlink.NewLinkAttrs()
@@ -149,6 +162,9 @@ func (k *kernelDevice) Close() error {
 	}
 	k.closed = true
 	var errs []error
+	if err := k.nft.remove(); err != nil {
+		errs = append(errs, err)
+	}
 	if err := k.client.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("wg: close wgctrl: %w", err))
 	}
