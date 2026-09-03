@@ -38,8 +38,8 @@ func loadOrCreateServerKey(ctx context.Context, path string, meta *store.Meta) (
 			return wg.Key{}, false, fmt.Errorf("server: %s: %w", path, err)
 		}
 	}
-	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
-		return wg.Key{}, false, fmt.Errorf("server: %s must be mode 0600, is %o", path, fi.Mode().Perm())
+	if err := checkSecretFileMode(path); err != nil {
+		return wg.Key{}, false, err
 	}
 
 	fp := wg.Fingerprint(key.PublicKey())

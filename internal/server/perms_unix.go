@@ -21,6 +21,18 @@ func checkDirPerms(dir string, fi os.FileInfo) error {
 	return nil
 }
 
+// checkSecretFileMode refuses a secret file readable by group or others.
+func checkSecretFileMode(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("server: stat %s: %w", path, err)
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("server: %s must be mode 0600, is %o", path, fi.Mode().Perm())
+	}
+	return nil
+}
+
 // secureSocket sets the admin socket to 0660 and, when the thawr group
 // exists, hands group ownership to it.
 func secureSocket(path string, _ net.Listener) error {
