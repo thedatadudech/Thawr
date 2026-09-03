@@ -78,7 +78,8 @@ flowchart TD
 | `internal/control` | Everything that decides: enrollment, registry, key distribution (netmap), policy compilation, endpoint tracking, IP allocation | `Enroller`, `Registry`, `Policy` (parse + compile), `NetMapBuilder`, `EndpointTable`, `Allocator` | `internal/store` |
 | `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface, `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables |
 | `internal/relay` | Forward opaque packets between authenticated peers; local UDP proxy on the client | `Server`, `Client`, frame codec | `internal/control` (for auth + visibility check via a small interface) |
-| `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, protobuf under `internal/api/proto` | `internal/control`, `internal/relay` |
+| `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, `Combine` (one listener for both), protobuf under `internal/api/proto` generated with buf via `make proto` | `internal/control`, `internal/relay` |
+| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state), TLS fingerprint pinning, the Enroll call; the daemon arrives with spec 003 | `Enroll(ctx, Options)`, `LoadState`, `SaveState`, `Forget`, `PinnedTLSConfig`, `ProbeFingerprint` | `internal/api/proto`, `internal/wg` |
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling | `main` | all of the above |
@@ -278,11 +279,14 @@ than its `min_client_version`.
 
 ### REST `/api/v1` (admin)
 
-`POST /login`, `GET /status`, `GET|POST /users`, `GET|POST|DELETE /tokens`,
-`GET|PATCH|DELETE /peers/{id}`, `POST /peers/mobile`, `GET /policy`,
-`POST /policy/check`, `POST /policy/reload`. JSON bodies, session cookie
-(`HttpOnly`, `Secure`, `SameSite=Strict`), CSRF via double-submit header
-on mutating calls. The Unix socket exposes the same API without login;
+`POST /login`, `POST /logout`, `GET /me`, `GET /status`, `GET|POST /users`,
+`GET|POST /tokens`, `DELETE /tokens/{id}`, `GET /peers`,
+`GET|PATCH|DELETE /peers/{name}`, `POST /peers/mobile`, `GET /policy`,
+`POST /policy/check`, `POST /policy/reload`. JSON bodies. Browser
+sessions are in memory (12 h) behind one `HttpOnly`, `Secure`,
+`SameSite=Strict` cookie; the session's CSRF token is returned by
+`/login` and `/me` and must be sent as `X-CSRF-Token` on mutating calls.
+The Unix socket exposes the same API without login as the local admin;
 access is filesystem permission (`root` and group `thawr`).
 
 ### Client local API
@@ -334,10 +338,12 @@ long as endpoints have not changed.
 | `tailscale.com/net/stun` (copied into `internal/stun` with license header) | STUN client and server codec | BSD-3-Clause |
 | `github.com/skip2/go-qrcode` | QR export | MIT |
 | `github.com/spf13/cobra` | CLI subcommands | Apache-2.0 |
+| `golang.org/x/term` | Password prompt without echo | BSD-3-Clause |
+| `github.com/bufbuild/buf` (build time only, via `go run`) | Protobuf compilation in `make proto` | Apache-2.0 |
 
 All pure Go. The binary builds with `CGO_ENABLED=0` on Linux, macOS, and
-Windows with Go 1.25 or newer (the minimum required by `modernc.org/sqlite`
-and `wireguard-go`).
+Windows with Go 1.26 or newer (the minimum required by the gRPC and
+`golang.org/x` releases in use).
 
 ## 9. Non-goals restated
 
