@@ -30,6 +30,9 @@ const (
 	// ActProbe: re-add the peer with Output.Endpoint and send a trigger
 	// packet so WireGuard initiates a handshake there.
 	ActProbe
+	// ActRelay: re-add the peer with its relay proxy as endpoint and send
+	// a trigger packet so the session is re-established through the relay.
+	ActRelay
 )
 
 // Options tune the machine; zero values select the spec defaults.
@@ -40,8 +43,12 @@ type Options struct {
 	// while traffic is queued before re-probing (3 min).
 	StallAfter time.Duration
 	// RetryAfter is the minimum gap between probe rounds toward an
-	// unreachable peer (60 s).
+	// unreachable peer, and the interval of single-candidate retries
+	// from the relay (60 s).
 	RetryAfter time.Duration
+	// Relay makes exhausted candidate lists end in Relay instead of
+	// Unreachable.
+	Relay bool
 }
 
 func (o Options) withDefaults() Options {
@@ -73,7 +80,7 @@ type Input struct {
 type Output struct {
 	State State
 	// Endpoint is the address in use (direct) or to try (probe); zero
-	// while the peer points at its sink.
+	// while the peer points at its sink or at the relay.
 	Endpoint netip.AddrPort
 	Action   Action
 	// Changed is true when state or endpoint differ from the last step,
@@ -93,6 +100,8 @@ type Machine struct {
 
 	wanted      bool // intent was ever expressed
 	freshIntent bool // intent since the last probe round started
+	fromRelay   bool // the current probe is a single-candidate retry
+	retryIdx    int  // next candidate to retry from the relay
 	windowStart time.Time
 	lastProbe   time.Time
 	lastRound   time.Time
@@ -153,24 +162,36 @@ func (m *Machine) Step(in Input) Output {
 		}
 	case Probing:
 		switch {
-		case advanced:
+		case advanced && in.Endpoint.IsValid():
+			m.state, m.endpoint = Direct, in.Endpoint
+		case advanced && !m.fromRelay:
 			m.state = Direct
-			if in.Endpoint.IsValid() {
-				m.endpoint = in.Endpoint
-			}
 		case m.dirty && in.Now.Sub(m.lastProbe) >= m.opts.ProbeWindow:
 			out.Action = m.startRound(in.Now)
+		case in.Now.Sub(m.windowStart) >= m.opts.ProbeWindow && m.fromRelay:
+			// The single retry failed: back to the relay until next time.
+			out.Action = m.useRelay()
 		case in.Now.Sub(m.windowStart) >= m.opts.ProbeWindow:
 			m.idx++
 			out.Action = m.probeNext(in.Now)
 		}
-	case Direct, Relay:
+	case Direct:
 		if advanced && in.Endpoint.IsValid() {
 			m.endpoint = in.Endpoint // roaming
 		}
 		stalled := !m.handshake.IsZero() && in.Now.Sub(m.handshake) > m.opts.StallAfter && in.Tx > m.tx && in.Rx == m.rx
 		if stalled && m.wanted {
 			out.Action = m.startRound(in.Now)
+		}
+	case Relay:
+		switch {
+		case advanced && in.Endpoint.IsValid():
+			// The peer reached us directly (its own probe): take the path.
+			m.state, m.endpoint = Direct, in.Endpoint
+		case m.dirty && in.Now.Sub(m.lastProbe) >= m.opts.ProbeWindow:
+			out.Action = m.startRound(in.Now)
+		case len(m.candidates) > 0 && in.Now.Sub(m.lastRound) >= m.opts.RetryAfter:
+			out.Action = m.retryFromRelay(in.Now)
 		}
 	}
 	m.rx, m.tx = in.Rx, in.Tx
@@ -181,15 +202,33 @@ func (m *Machine) Step(in Input) Output {
 
 // startRound begins probing from the first candidate.
 func (m *Machine) startRound(now time.Time) Action {
-	m.dirty, m.freshIntent = false, false
+	m.dirty, m.freshIntent, m.fromRelay = false, false, false
 	m.lastRound = now
 	m.idx = 0
 	return m.probeNext(now)
 }
 
+// retryFromRelay probes one candidate, the next in turn, keeping the
+// relay for everything but that candidate's window.
+func (m *Machine) retryFromRelay(now time.Time) Action {
+	m.lastRound, m.fromRelay = now, true
+	m.idx = m.retryIdx % len(m.candidates)
+	m.retryIdx = m.idx + 1
+	return m.probeNext(now)
+}
+
+// useRelay points the peer at the relay.
+func (m *Machine) useRelay() Action {
+	m.state, m.endpoint, m.fromRelay = Relay, netip.AddrPort{}, false
+	return ActRelay
+}
+
 // probeNext tries candidate idx or gives up.
 func (m *Machine) probeNext(now time.Time) Action {
 	if m.idx >= len(m.candidates) {
+		if m.opts.Relay {
+			return m.useRelay()
+		}
 		m.state, m.endpoint = Unreachable, netip.AddrPort{}
 		return ActSink
 	}
