@@ -112,6 +112,7 @@ func Enroll(ctx context.Context, opts Options) (State, error) {
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
+	hostname = shortHostname(hostname)
 
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	if err != nil {
@@ -182,4 +183,18 @@ func ServerAddr(server string) (string, error) {
 		return "", fmt.Errorf("client: server %q has no host", server)
 	}
 	return net.JoinHostPort(host, port), nil
+}
+
+// shortHostname keeps the first DNS label of a hostname, capped at the
+// 63 characters the server accepts, so "alice-laptop.local" enrols as
+// "alice-laptop" and long runner names still validate.
+func shortHostname(h string) string {
+	h = strings.TrimSpace(h)
+	if i := strings.IndexByte(h, '.'); i > 0 {
+		h = h[:i]
+	}
+	if len(h) > 63 {
+		h = h[:63]
+	}
+	return h
 }

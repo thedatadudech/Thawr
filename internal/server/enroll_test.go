@@ -78,6 +78,7 @@ func TestEnrollOverTLS(t *testing.T) {
 
 	if _, err := client.Enroll(context.Background(), client.Options{
 		Server: "https://" + h.srv.HTTPSAddr(), Token: created.Secret, Fingerprint: h.srv.tlsFingerprint, StateDir: t.TempDir(),
+		Hostname: "second", Version: "0.1.0",
 	}); err == nil || !strings.Contains(err.Error(), "invalid token") {
 		t.Errorf("token reuse: %v", err)
 	}

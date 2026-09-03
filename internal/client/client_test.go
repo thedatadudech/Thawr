@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -208,3 +209,19 @@ func indexOf(s, sub string) int {
 }
 
 var _ http.Handler = (*http.ServeMux)(nil)
+
+func TestShortHostname(t *testing.T) {
+	cases := map[string]string{
+		"alice-laptop.local":    "alice-laptop",
+		"Mac-1234.fritz.box":    "Mac-1234",
+		"plain":                 "plain",
+		" spaced ":              "spaced",
+		strings.Repeat("x", 70): strings.Repeat("x", 63),
+		".leading":              ".leading",
+	}
+	for in, want := range cases {
+		if got := shortHostname(in); got != want {
+			t.Errorf("shortHostname(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
