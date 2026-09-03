@@ -138,7 +138,11 @@ type clientStatus struct {
 	Connected bool   `json:"connected"`
 	IPv4      string `json:"ipv4"`
 	Symmetric bool   `json:"symmetric"`
-	Peers     []struct {
+	Relay     struct {
+		Connected bool `json:"connected"`
+		Peers     int  `json:"peers"`
+	} `json:"relay"`
+	Peers []struct {
 		Name         string   `json:"name"`
 		IPv4         string   `json:"ipv4"`
 		Path         string   `json:"path"`
