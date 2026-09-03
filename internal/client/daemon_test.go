@@ -18,7 +18,9 @@ import (
 
 	"github.com/thedatadudech/thawr/internal/api"
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/control/path"
 	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/thedatadudech/thawr/internal/stun"
 	"github.com/thedatadudech/thawr/internal/wg"
 	"github.com/thedatadudech/thawr/internal/wg/wgtest"
 )
@@ -26,15 +28,17 @@ import (
 // controlPlane is a real server-side control plane over a TLS HTTP/2
 // test server, enough for the daemon to enrol and sync.
 type controlPlane struct {
-	t        *testing.T
-	st       *store.Store
-	hub      *control.Hub
-	registry *control.Registry
-	tokens   *control.Tokens
-	admin    control.Principal
-	ts       *httptest.Server
-	fp       string
-	hubKey   wg.Key
+	t         *testing.T
+	st        *store.Store
+	hub       *control.Hub
+	registry  *control.Registry
+	tokens    *control.Tokens
+	endpoints *control.EndpointTable
+	paths     *control.PathTable
+	admin     control.Principal
+	ts        *httptest.Server
+	fp        string
+	hubKey    wg.Key
 }
 
 func newControlPlane(t *testing.T) *controlPlane {
@@ -63,11 +67,13 @@ func newControlPlane(t *testing.T) *controlPlane {
 	registry := control.NewRegistry(st, quiet).WithNotifier(hub)
 	enroller := control.NewEnroller(st, time.Now, quiet, overlay, "").WithNotifier(hub)
 	endpoints := control.NewEndpointTable(time.Now)
-	hubCfg := control.HubConfig{PublicKey: hubKey.PublicKey().String(), Endpoint: "127.0.0.1:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay}
+	paths := control.NewPathTable(time.Now)
+	hubCfg := control.HubConfig{PublicKey: hubKey.PublicKey().String(), Endpoint: "127.0.0.1:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay,
+		STUNAddrs: []string{"127.0.0.1:3478", "127.0.0.1:3479"}}
 	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: control.NewPathTable(time.Now),
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +87,7 @@ func newControlPlane(t *testing.T) *controlPlane {
 	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2"}}
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet),
+	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths,
 		admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}, ts: ts, fp: Fingerprint(ts.Certificate().Raw), hubKey: hubKey}
 }
 
@@ -111,19 +117,38 @@ func shortSocket(t *testing.T) string {
 	return filepath.Join(dir, "c.sock")
 }
 
-func startDaemon(t *testing.T, dir string) (*Daemon, *wgtest.Fake, func()) {
+// fixedSTUN scripts reflexive discovery: every server maps to mapped.
+func fixedSTUN(mapped string, symmetric bool) STUNFunc {
+	return func(_ context.Context, _ wg.Device, servers []netip.AddrPort, _ time.Duration) (stun.Result, bool, error) {
+		res := stun.Result{Symmetric: symmetric}
+		for range servers {
+			res.Mapped = append(res.Mapped, netip.MustParseAddrPort(mapped))
+		}
+		return res, false, nil
+	}
+}
+
+func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemon, *wgtest.Fake, func()) {
 	t.Helper()
 	fake := wgtest.New("thawr0")
 	socket := shortSocket(t)
-	d, err := NewDaemon(DaemonOptions{
+	opts := DaemonOptions{
 		StateDir: dir, Socket: socket, Interface: "thawr0",
 		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "0.1.0",
-		MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond, EndpointInterval: time.Hour,
+		MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond, EndpointInterval: time.Hour, LocalPoll: time.Hour,
 		Endpoints: func(port int, _ string) []netip.AddrPort {
 			return []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("192.0.2.10"), uint16(port))}
 		},
-	})
+		STUN:      fixedSTUN("203.0.113.5:4444", false),
+		Path:      path.Options{ProbeWindow: 100 * time.Millisecond, RetryAfter: 500 * time.Millisecond},
+		ProbeTick: 20 * time.Millisecond, IdleTick: 50 * time.Millisecond,
+		Trigger: func(context.Context, netip.Addr, netip.Addr) error { return nil },
+	}
+	for _, m := range mods {
+		m(&opts)
+	}
+	d, err := NewDaemon(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +190,7 @@ func TestBuildConfig(t *testing.T) {
 	nm := NetMap{
 		SelfIPv4: "100.64.0.7",
 		Hub:      HubPeer{PublicKey: hubKey.PublicKey().String(), Endpoint: "203.0.113.1:51820", AllowedIPs: []string{"100.64.0.1/32", "100.64.0.21/32"}},
-		Peers: []Peer{{Name: "nas", PublicKey: peerKey.PublicKey().String(), IPv4: "100.64.0.3", Endpoints: []string{"192.168.1.5:41820", "10.0.0.5:41820"},
+		Peers: []Peer{{Name: "nas", PublicKey: peerKey.PublicKey().String(), IPv4: "100.64.0.3", Endpoints: []Endpoint{{Addr: "192.168.1.5:41820", Kind: KindLocal}, {Addr: "10.0.0.5:41820", Kind: KindLocal}},
 			AllowedIPs: []string{"100.64.0.3/32"}, Keepalive: true}},
 	}
 	cfg, err := BuildConfig(nm, key, 41820, netip.MustParsePrefix("100.64.0.0/10"))
@@ -183,8 +208,11 @@ func TestBuildConfig(t *testing.T) {
 		t.Errorf("hub: %+v", hub)
 	}
 	nas := cfg.Peers[1]
-	if nas.PublicKey != peerKey.PublicKey() || nas.Endpoint.String() != "192.168.1.5:41820" || nas.Keepalive != PeerKeepalive || nas.AllowedIPs[0].String() != "100.64.0.3/32" {
-		t.Errorf("nas: %+v", nas)
+	if nas.PublicKey != peerKey.PublicKey() || nas.Endpoint.IsValid() || nas.Keepalive != PeerKeepalive || nas.AllowedIPs[0].String() != "100.64.0.3/32" {
+		t.Errorf("nas: %+v (the prober owns mesh endpoints)", nas)
+	}
+	if c := nm.Peers[0].Candidates(); len(c) != 2 || c[0].Kind != control.EndpointLocal {
+		t.Errorf("candidates: %+v", c)
 	}
 	if _, err := BuildConfig(NetMap{SelfIPv4: "bad"}, key, 1, netip.MustParsePrefix("100.64.0.0/10")); err == nil {
 		t.Error("bad self address accepted")
@@ -269,7 +297,7 @@ func TestDaemonAppliesCachedNetMapFirst(t *testing.T) {
 	if nm.Hub.PublicKey != cached.Hub.PublicKey {
 		t.Errorf("cached map not applied: %+v", nm)
 	}
-	if cfgs := len(fake.Configs); cfgs < 1 {
+	if cfgs := len(fake.Snapshots()); cfgs < 1 {
 		t.Errorf("device not configured from cache")
 	}
 	time.Sleep(300 * time.Millisecond)

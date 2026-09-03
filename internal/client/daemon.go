@@ -21,6 +21,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
+	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/control/path"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -44,6 +46,19 @@ type DaemonOptions struct {
 	EndpointInterval time.Duration
 	// Endpoints overrides local endpoint discovery (tests).
 	Endpoints func(port int, ignoreIface string) []netip.AddrPort
+	// LocalPoll is how often local addresses are re-read (15 s).
+	LocalPoll time.Duration
+	// STUN overrides reflexive discovery (tests); STUNTimeout is per
+	// attempt (2 s).
+	STUN        STUNFunc
+	STUNTimeout time.Duration
+	// Path tunes the per-peer state machine; ProbeTick and IdleTick are
+	// the prober's cadence while probing (250 ms) and otherwise (5 s).
+	Path      path.Options
+	ProbeTick time.Duration
+	IdleTick  time.Duration
+	// Trigger overrides the probe packet (tests).
+	Trigger TriggerFunc
 }
 
 func (o DaemonOptions) withDefaults() DaemonOptions {
@@ -80,6 +95,24 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 	if o.Endpoints == nil {
 		o.Endpoints = LocalEndpoints
 	}
+	if o.LocalPoll == 0 {
+		o.LocalPoll = 15 * time.Second
+	}
+	if o.STUN == nil {
+		o.STUN = discoverSTUN
+	}
+	if o.STUNTimeout == 0 {
+		o.STUNTimeout = 2 * time.Second
+	}
+	if o.ProbeTick == 0 {
+		o.ProbeTick = 250 * time.Millisecond
+	}
+	if o.IdleTick == 0 {
+		o.IdleTick = 5 * time.Second
+	}
+	if o.Trigger == nil {
+		o.Trigger = triggerUDP
+	}
 	return o
 }
 
@@ -89,6 +122,18 @@ type Daemon struct {
 	log     *slog.Logger
 	state   State
 	overlay netip.Prefix
+	selfIP  netip.Addr
+
+	// devMu serialises multi-step device changes (probe re-adds).
+	devMu sync.Mutex
+
+	// pmu guards the path prober's state.
+	pmu           sync.Mutex
+	paths         map[string]*peerPath
+	selfAddrs     []netip.Addr
+	selfSymmetric bool
+	selfEndpoints []control.Endpoint
+	pathWake      chan struct{}
 
 	mu        sync.Mutex
 	key       wg.Key
@@ -127,7 +172,12 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 			return nil, err
 		}
 	}
-	return &Daemon{opts: opts, log: opts.Logger.With("peer", st.Name), state: st, overlay: overlay.Masked(), key: key, mapCh: make(chan NetMap, 16)}, nil
+	selfIP, err := netip.ParseAddr(st.IPv4)
+	if err != nil {
+		return nil, fmt.Errorf("client: address %q in state: %w", st.IPv4, err)
+	}
+	return &Daemon{opts: opts, log: opts.Logger.With("peer", st.Name), state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key,
+		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1)}, nil
 }
 
 // randomPort picks a listen port in the dynamic range.
@@ -156,6 +206,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.dev = dev
 	d.mu.Unlock()
 	defer func() {
+		d.closeSinks()
 		if err := dev.Close(); err != nil {
 			d.log.Error("close device", "err", err)
 		}
@@ -188,7 +239,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	d.log.Info("client ready", "interface", dev.Name(), "backend", dev.Backend(), "ipv4", d.state.IPv4, "listen_port", d.state.ListenPort, "socket", d.opts.Socket)
 
+	pathsDone := make(chan struct{})
+	go func() {
+		defer close(pathsDone)
+		d.pathLoop(ctx)
+	}()
 	d.syncLoop(ctx)
+	<-pathsDone
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelShutdown()
@@ -282,7 +339,7 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 		d.log.Error("apply netmap", "err", err)
 	}
 
-	go d.reportEndpoints(streamCtx, client)
+	go d.reportLoop(streamCtx, client)
 
 	for {
 		msg, err := stream.Recv()
@@ -298,27 +355,6 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 	}
 }
 
-// reportEndpoints sends local candidates now and every EndpointInterval.
-func (d *Daemon) reportEndpoints(ctx context.Context, client thawrv1.ControlClient) {
-	t := time.NewTicker(d.opts.EndpointInterval)
-	defer t.Stop()
-	for {
-		eps := d.opts.Endpoints(d.state.ListenPort, d.opts.Interface)
-		req := &thawrv1.EndpointReport{ListenPort: uint32(d.state.ListenPort)} //nolint:gosec // port is 1-65535
-		for _, e := range eps {
-			req.Endpoints = append(req.Endpoints, &thawrv1.Endpoint{Addr: e.String(), Kind: thawrv1.EndpointKind_ENDPOINT_KIND_LOCAL})
-		}
-		if _, err := client.ReportEndpoints(ctx, req); err != nil && ctx.Err() == nil {
-			d.log.Warn("report endpoints", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
 // apply configures the device from nm and caches it.
 func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 	d.mu.Lock()
@@ -328,12 +364,18 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 	if err != nil {
 		return err
 	}
-	if err := dev.Configure(ctx, cfg); err != nil {
+	d.devMu.Lock()
+	err = dev.Configure(ctx, cfg)
+	d.devMu.Unlock()
+	if err != nil {
 		return err
 	}
 	d.mu.Lock()
 	d.netmap = &nm
 	d.mu.Unlock()
+	if err := d.syncPaths(ctx, nm, cfg); err != nil {
+		d.log.Warn("path state", "err", err)
+	}
 	if cache {
 		if err := SaveNetMap(d.opts.StateDir, nm); err != nil {
 			d.log.Warn("cache netmap", "err", err)

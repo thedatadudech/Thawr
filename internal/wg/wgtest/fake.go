@@ -153,6 +153,18 @@ func (f *Fake) Closed() bool {
 	return f.closed
 }
 
+// Snapshots returns a copy of Configs, safe to read while the device
+// is in use.
+func (f *Fake) Snapshots() []wg.Config {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]wg.Config, len(f.Configs))
+	for i, c := range f.Configs {
+		out[i] = cloneConfig(c)
+	}
+	return out
+}
+
 // Last returns the most recent snapshot and whether one exists.
 func (f *Fake) Last() (wg.Config, bool) {
 	f.mu.Lock()
