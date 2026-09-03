@@ -29,11 +29,8 @@ func (h *rest) handleRelay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !strings.EqualFold(r.Header.Get("Upgrade"), relay.Protocol) || !headerHasToken(r.Header, "Connection", "upgrade") {
-		w.Header().Set("Upgrade", relay.Protocol)
-		writeError(w, http.StatusUpgradeRequired, "upgrade to "+relay.Protocol+" required")
-		return
-	}
+	// Authentication comes first: an unauthenticated caller learns
+	// nothing about the upgrade, whatever headers it sent.
 	secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || secret == "" {
 		writeError(w, http.StatusUnauthorized, "node secret required")
@@ -42,6 +39,11 @@ func (h *rest) handleRelay(w http.ResponseWriter, r *http.Request) {
 	peer, err := h.deps.NodeAuth.PeerByNodeSecret(r.Context(), secret)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid node secret")
+		return
+	}
+	if !strings.EqualFold(r.Header.Get("Upgrade"), relay.Protocol) || !headerHasToken(r.Header, "Connection", "upgrade") {
+		w.Header().Set("Upgrade", relay.Protocol)
+		writeError(w, http.StatusUpgradeRequired, "upgrade to "+relay.Protocol+" required")
 		return
 	}
 	key, err := wg.ParseKey(peer.PublicKey)

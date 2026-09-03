@@ -106,6 +106,9 @@ func TestRelayAuth(t *testing.T) {
 	if got := env.rawUpgrade(t, http.MethodGet, upgrade); got != http.StatusUnauthorized {
 		t.Errorf("no secret: %d", got)
 	}
+	if got := env.rawUpgrade(t, http.MethodGet, nil); got != http.StatusUnauthorized {
+		t.Errorf("no secret and no upgrade headers: %d", got)
+	}
 	if got := env.rawUpgrade(t, http.MethodGet, with(map[string]string{"Authorization": "Bearer nope"})); got != http.StatusUnauthorized {
 		t.Errorf("wrong secret: %d", got)
 	}
