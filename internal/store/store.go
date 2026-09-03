@@ -14,6 +14,8 @@ import (
 // single-writer model under WAL.
 type Store struct {
 	db *sql.DB
+	// tx is set on the Store handed to an InTx callback.
+	tx *sql.Tx
 }
 
 // Open opens or creates the database at path, applies connection pragmas
@@ -49,7 +51,13 @@ func (s *Store) Close() error {
 }
 
 // Meta returns the key/value metadata accessor.
-func (s *Store) Meta() *Meta { return &Meta{db: s.db} }
+func (s *Store) Meta() *Meta { return &Meta{q: s.q()} }
 
 // Peers returns the peer accessor.
-func (s *Store) Peers() *Peers { return &Peers{db: s.db} }
+func (s *Store) Peers() *Peers { return &Peers{q: s.q()} }
+
+// Users returns the user accessor.
+func (s *Store) Users() *Users { return &Users{q: s.q()} }
+
+// Tokens returns the enrollment token accessor.
+func (s *Store) Tokens() *Tokens { return &Tokens{q: s.q()} }
