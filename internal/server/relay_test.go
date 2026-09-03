@@ -17,6 +17,7 @@ import (
 // closes its session; the status endpoint counts.
 func TestRelayOverTLS(t *testing.T) {
 	cfg, _ := testConfig(t)
+	allowSelfPolicy(t, cfg)
 	h := newHarness(t, cfg)
 	h.srv.deps.HubOptions = control.HubOptions{Coalesce: 10 * time.Millisecond}
 	h.start(t)

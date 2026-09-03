@@ -86,6 +86,7 @@ func TestHubDevicePeersFollowRegistry(t *testing.T) {
 // and the server reports it online.
 func TestSyncOverTLS(t *testing.T) {
 	cfg, _ := testConfig(t)
+	allowSelfPolicy(t, cfg)
 	cfg.PublicAddr = "127.0.0.1"
 	h := newHarness(t, cfg)
 	h.srv.deps.HubOptions = control.HubOptions{Coalesce: 10 * time.Millisecond, KeepaliveInterval: 200 * time.Millisecond, OfflineAfter: 200 * time.Millisecond}

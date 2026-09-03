@@ -73,6 +73,15 @@ func testConfig(t *testing.T) (*config.Config, string) {
 	return cfg, dir
 }
 
+// allowSelfPolicy writes a policy letting peers of one owner see each
+// other, which is what tests from before spec 006 assume.
+func allowSelfPolicy(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	if err := os.WriteFile(cfg.PolicyFile, []byte("version: 1\nacls:\n  - action: accept\n    src: ['*']\n    dst: ['self:*']\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type harness struct {
 	srv    *Server
 	fake   *wgtest.Fake

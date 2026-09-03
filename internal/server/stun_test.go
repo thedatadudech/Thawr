@@ -62,6 +62,7 @@ func TestServerAnswersSTUN(t *testing.T) {
 // reach the hub from becomes a reflexive candidate for its peers.
 func TestHubObservedEndpointReachesNetmap(t *testing.T) {
 	cfg, _ := testConfig(t)
+	allowSelfPolicy(t, cfg)
 	h := newHarness(t, cfg)
 	h.srv.deps.ObserveInterval = 20 * time.Millisecond
 	h.srv.deps.HubOptions = control.HubOptions{Coalesce: 10 * time.Millisecond}

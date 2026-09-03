@@ -32,7 +32,7 @@ type restEnv struct {
 	local    http.Handler // admin-socket-style handler
 }
 
-func newRESTEnv(t *testing.T) *restEnv {
+func newRESTEnv(t *testing.T, mods ...func(*RESTDeps, *restEnv)) *restEnv {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
@@ -55,6 +55,9 @@ func newRESTEnv(t *testing.T) *restEnv {
 	ui := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("Thawr")}}
 	deps := RESTDeps{Status: fakeStatus{}, UI: ui, Logger: quiet, Users: users, Auth: users, Tokens: env.tokens,
 		Peers: env.registry, Paths: env.paths, Sessions: env.sessions, Join: JoinInfo{ServerURL: "https://vpn.example.com", Fingerprint: "sha256:ab"}}
+	for _, m := range mods {
+		m(&deps, env)
+	}
 	env.handler, err = NewREST(deps)
 	if err != nil {
 		t.Fatal(err)

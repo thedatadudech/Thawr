@@ -65,7 +65,7 @@ type Server struct {
 	tlsCert        tls.Certificate
 	tlsFingerprint string
 	device         wg.Device
-	policy         atomic.Pointer[policy.Policy]
+	policySvc      *control.PolicyService
 	startedAt      time.Time
 
 	users     *control.Users
@@ -132,7 +132,7 @@ func (s *Server) HTTPSAddr() string {
 }
 
 // Policy returns the currently loaded policy.
-func (s *Server) Policy() *policy.Policy { return s.policy.Load() }
+func (s *Server) Policy() *policy.Policy { return s.policySvc.Current() }
 
 // Check validates everything that can be validated without starting:
 // TLS files in file mode and the policy file. It never touches data_dir.
@@ -194,10 +194,6 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	defer s.closeQuietly("wireguard", s.device.Close)
 
-	if err := s.loadPolicy(); err != nil {
-		return err
-	}
-
 	if err := s.buildServices(ctx); err != nil {
 		return err
 	}
@@ -219,7 +215,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths,
-		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay,
+		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {
@@ -314,34 +310,12 @@ func (s *Server) startHub(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) loadPolicy() error {
-	p, err := policy.Load(s.cfg.PolicyFile)
-	switch {
-	case errors.Is(err, policy.ErrNotFound):
-		s.log.Warn("policy file not found, using empty default-deny policy", "path", s.cfg.PolicyFile)
-		p = policy.Empty()
-	case err != nil:
-		return err
-	}
-	s.policy.Store(p)
-	s.log.Info("policy loaded", "path", s.cfg.PolicyFile, "rules", len(p.ACLs))
-	return nil
-}
-
-// reloadPolicy re-reads the policy file; an invalid file leaves the
-// running policy untouched.
+// reloadPolicy re-reads the policy file on SIGHUP; an invalid file
+// leaves the running policy untouched.
 func (s *Server) reloadPolicy() {
-	p, err := policy.Load(s.cfg.PolicyFile)
-	switch {
-	case errors.Is(err, policy.ErrNotFound):
-		s.log.Warn("policy reload: file not found, keeping current policy", "path", s.cfg.PolicyFile)
-		return
-	case err != nil:
+	if _, err := s.policySvc.Reload(context.Background()); err != nil {
 		s.log.Error("policy reload failed, keeping current policy", "path", s.cfg.PolicyFile, "err", err)
-		return
 	}
-	s.policy.Store(p)
-	s.log.Info("policy reloaded", "path", s.cfg.PolicyFile, "rules", len(p.ACLs))
 }
 
 // bindSTUN binds every configured STUN address and serves binding
@@ -559,13 +533,18 @@ func (s *Server) buildServices(ctx context.Context) error {
 	s.hub = hub
 	s.endpoints = control.NewEndpointTable(s.deps.Now)
 	s.paths = control.NewPathTable(s.deps.Now)
-	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log)
+	s.policySvc = control.NewPolicyService(s.st, s.log, s.cfg.PolicyFile, hub)
+	if err := s.policySvc.LoadInitial(ctx); err != nil {
+		return err
+	}
+	visibility := control.PolicyVisibility{Load: s.policySvc.Load}
+	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed)
 	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now)
 	s.sessions = api.NewSessions(s.deps.Now)
-	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, control.OwnerVisibility{}, hub.Generation)},
+	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},
 		relay.ServerOptions{MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Now: s.deps.Now, Logger: s.log})
-	s.netmaps = control.NewNetMapBuilder(s.st, control.OwnerVisibility{}, s.endpoints, hub, control.HubConfig{
+	s.netmaps = control.NewNetMapBuilder(s.st, visibility, s.endpoints, hub, control.HubConfig{
 		PublicKey: s.hubKey.PublicKey().String(),
 		Endpoint:  s.cfg.HubEndpoint(),
 		Address:   s.cfg.HubAddr().Addr(),
@@ -643,8 +622,37 @@ func (s *Server) configureHub(ctx context.Context) error {
 	if err := s.device.Configure(ctx, cfg); err != nil {
 		return err
 	}
+	s.installHubFilter(ctx, peers)
 	s.log.Debug("hub device configured", "peers", len(cfg.Peers))
 	return nil
+}
+
+// installHubFilter applies the policy to what the hub forwards: every
+// static (mobile) peer gets the rules the policy grants toward it, and
+// every registered peer may ping the hub.
+func (s *Server) installHubFilter(ctx context.Context, peers []store.Peer) {
+	fd, ok := s.device.(wg.Filterable)
+	if !ok {
+		return
+	}
+	set := wg.FilterSet{Interface: s.device.Name(), Hook: wg.HookForward, Local: s.cfg.HubAddr().Addr()}
+	compiled := s.policySvc.Compiled(ctx)
+	for _, p := range peers {
+		ip, err := netip.ParseAddr(p.IPv4)
+		if err != nil {
+			continue
+		}
+		set.Visible = append(set.Visible, ip)
+		if p.Mode != store.ModeStatic {
+			continue
+		}
+		for _, r := range compiled.FilterFor(p.ID) {
+			set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(r.Src, 32), Dst: ip, Proto: r.Proto, Lo: r.Lo, Hi: r.Hi})
+		}
+	}
+	if err := fd.SetFilter(ctx, set); err != nil {
+		s.log.Error("hub filter", "err", err)
+	}
 }
 
 // Hub exposes the presence hub (tests and status).
