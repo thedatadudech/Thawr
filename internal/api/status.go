@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/thedatadudech/thawr/internal/relay"
+)
 
 // Status is the JSON body of GET /api/v1/status.
 type Status struct {
@@ -11,6 +15,8 @@ type Status struct {
 	OnlinePeers      int    `json:"online_peers"`
 	TLSFingerprint   string `json:"tls_fingerprint"`
 	HubPublicKey     string `json:"hub_public_key"`
+	// Relay holds the packet relay counters.
+	Relay relay.Stats `json:"relay"`
 }
 
 // StatusSource provides the live status; the server implements it.

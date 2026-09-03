@@ -25,7 +25,10 @@ type RESTDeps struct {
 	Presence PresenceSource
 	// Paths reports how each peer reaches the others; nil means unknown.
 	Paths PathsSource
-	Join  JoinInfo
+	// NodeAuth and Relay enable GET /relay; without both it answers 501.
+	NodeAuth NodeAuth
+	Relay    RelaySession
+	Join     JoinInfo
 	// Sessions backs cookie logins on the HTTPS listener.
 	Sessions *Sessions
 	// Local marks the admin-socket handler: every request acts as the
@@ -82,10 +85,7 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")
 	})
-	// TODO(2026-09-02): spec 005 replaces this with the relay upgrade.
-	mux.HandleFunc("/relay", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotImplemented, "relay not available yet")
-	})
+	mux.HandleFunc("/relay", h.handleRelay)
 	mux.Handle("/", http.FileServerFS(deps.UI))
 	return mux, nil
 }
