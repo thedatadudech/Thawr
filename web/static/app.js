@@ -120,8 +120,47 @@
     }
   }
 
+  function listItems(ul, items, prefix) {
+    ul.replaceChildren();
+    for (const text of items || []) {
+      const li = document.createElement("li");
+      li.textContent = (prefix ? prefix + ": " : "") + text;
+      ul.append(li);
+    }
+  }
+
+  // The policy page is read-only: the file stays the source of truth.
+  async function loadPolicy() {
+    if (me.role !== "admin") { show("#policy-section", false); return; }
+    show("#policy-section", true);
+    const p = await api("GET", "/api/v1/policy");
+    const s = p.summary || {};
+    $("#policy-summary").textContent = `hash ${p.hash || "none (empty default-deny policy)"}: ${s.rules || 0} rules, ${s.peers || 0} peers, ${s.visible_pairs || 0} visible pairs`;
+    listItems($("#policy-warnings"), p.warnings, "warning");
+    $("#policy-source").textContent = p.source || "(no policy file)";
+  }
+
+  $("#policy-reload").addEventListener("click", async () => {
+    try {
+      const rep = await api("POST", "/api/v1/policy/reload");
+      listItems($("#policy-check-result"), rep.warnings, "warning");
+      await loadPolicy();
+    } catch (e) { alert(e.message); }
+  });
+
+  $("#policy-check").addEventListener("click", async () => {
+    try {
+      const rep = await api("POST", "/api/v1/policy/check", { yaml: $("#policy-input").value });
+      const lines = [];
+      for (const w of rep.warnings || []) lines.push("warning: " + w);
+      for (const err of rep.errors || []) lines.push("error: " + err);
+      if (rep.ok) lines.push(`ok: ${rep.summary.rules} rules, ${rep.summary.peers} peers, ${rep.summary.visible_pairs} visible pairs`);
+      listItems($("#policy-check-result"), lines);
+    } catch (e) { alert(e.message); }
+  });
+
   async function refresh() {
-    await Promise.all([loadPeers(), loadTokens(), loadUsers()]);
+    await Promise.all([loadPeers(), loadTokens(), loadUsers(), loadPolicy()]);
   }
 
   async function enter(session) {

@@ -35,16 +35,28 @@ type CreatedToken struct {
 	Secret string
 }
 
+// TagAllowed decides whether a user may create tokens carrying tag
+// ("tag:name"); the policy's tagOwners answer it.
+type TagAllowed func(user, tag string) bool
+
 // Tokens issues and lists one-time enrollment tokens.
 type Tokens struct {
-	store *store.Store
-	now   func() time.Time
-	log   *slog.Logger
+	store      *store.Store
+	now        func() time.Time
+	log        *slog.Logger
+	tagAllowed TagAllowed
 }
 
-// NewTokens builds the token service.
+// NewTokens builds the token service. Without WithTagAllowed only
+// admins may create tagged tokens.
 func NewTokens(st *store.Store, now func() time.Time, log *slog.Logger) *Tokens {
 	return &Tokens{store: st, now: now, log: log}
+}
+
+// WithTagAllowed installs the tagOwners check for members.
+func (t *Tokens) WithTagAllowed(fn TagAllowed) *Tokens {
+	t.tagAllowed = fn
+	return t
 }
 
 // Create issues a token. Members may only create tokens for themselves.
@@ -65,6 +77,13 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 	tags, err := normalizeTags(req.Tags)
 	if err != nil {
 		return CreatedToken{}, err
+	}
+	if !by.IsAdmin() {
+		for _, tag := range tags {
+			if t.tagAllowed == nil || !t.tagAllowed(by.Name, tag) {
+				return CreatedToken{}, fmt.Errorf("%w: %s may not create tokens with %s", ErrForbidden, by.Name, tag)
+			}
+		}
 	}
 	if req.PeerName != "" && !validLabel(req.PeerName) {
 		return CreatedToken{}, fmt.Errorf("%w: peer name %q must be a DNS label", ErrValidation, req.PeerName)

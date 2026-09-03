@@ -130,7 +130,8 @@ type Daemon struct {
 	selfIP  netip.Addr
 
 	// devMu serialises multi-step device changes (probe re-adds).
-	devMu sync.Mutex
+	devMu      sync.Mutex
+	filterWarn sync.Once
 
 	// pmu guards the path prober's state.
 	pmu           sync.Mutex
@@ -386,6 +387,7 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 	if err != nil {
 		return err
 	}
+	d.installFilter(ctx, dev, nm)
 	d.mu.Lock()
 	d.netmap = &nm
 	d.mu.Unlock()
@@ -403,6 +405,27 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 	default:
 	}
 	return nil
+}
+
+// installFilter applies the netmap's receiver-side policy to the
+// device; a device without filter support is reported once.
+func (d *Daemon) installFilter(ctx context.Context, dev wg.Device, nm NetMap) {
+	fd, ok := dev.(wg.Filterable)
+	if !ok {
+		d.filterWarn.Do(func() {
+			d.log.Warn("device cannot filter; policy is enforced by key distribution only", "backend", dev.Backend())
+		})
+		return
+	}
+	set := FilterSet(nm, dev.Name(), d.selfIP)
+	d.devMu.Lock()
+	err := fd.SetFilter(ctx, set)
+	d.devMu.Unlock()
+	if err != nil {
+		d.log.Error("install filter", "err", err)
+		return
+	}
+	d.log.Debug("filter installed", "rules", len(set.Rules), "visible", len(set.Visible))
 }
 
 func (d *Daemon) generation() int64 {

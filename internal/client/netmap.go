@@ -34,6 +34,17 @@ type NetMap struct {
 	ReceivedAt time.Time `json:"received_at"`
 	// STUN lists the server's STUN listeners as host:port.
 	STUN []string `json:"stun"`
+	// Filter is the receiver-side policy: who may reach this device on
+	// which ports.
+	Filter []FilterRule `json:"filter"`
+}
+
+// FilterRule allows Src to reach this device on a port range.
+type FilterRule struct {
+	Src    string `json:"src"`
+	Proto  string `json:"proto"`
+	PortLo uint16 `json:"port_lo"`
+	PortHi uint16 `json:"port_hi"`
 }
 
 // Endpoint is one candidate address of a peer with its kind
@@ -120,6 +131,13 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		Hub:        HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...)},
 		ReceivedAt: now,
 		STUN:       append([]string{}, m.GetSelf().GetStunAddrs()...),
+		Filter:     []FilterRule{},
+	}
+	for _, f := range m.GetFilter() {
+		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {
+			continue
+		}
+		nm.Filter = append(nm.Filter, FilterRule{Src: f.GetSrcIpv4(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
 	}
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
@@ -205,6 +223,30 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 		cfg.Peers = append(cfg.Peers, peer)
 	}
 	return cfg, nil
+}
+
+// FilterSet turns the netmap's filter into the device's: visible peers
+// and the hub may ping, listed sources reach the listed ports.
+func FilterSet(nm NetMap, iface string, self netip.Addr) wg.FilterSet {
+	set := wg.FilterSet{Interface: iface, Hook: wg.HookInput, Local: self}
+	for _, p := range nm.Peers {
+		if ip, err := netip.ParseAddr(p.IPv4); err == nil {
+			set.Visible = append(set.Visible, ip)
+		}
+	}
+	for _, a := range nm.Hub.AllowedIPs {
+		if p, err := netip.ParsePrefix(a); err == nil && p.Bits() == 32 {
+			set.Visible = append(set.Visible, p.Addr())
+		}
+	}
+	for _, f := range nm.Filter {
+		src, err := netip.ParseAddr(f.Src)
+		if err != nil {
+			continue
+		}
+		set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(src, 32), Proto: f.Proto, Lo: f.PortLo, Hi: f.PortHi})
+	}
+	return set
 }
 
 func parsePrefixes(in []string) ([]netip.Prefix, error) {

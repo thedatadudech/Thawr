@@ -32,6 +32,7 @@ make run-server    # go run ./cmd/thawr server --config config/server.example.ya
 make run-client    # go run ./cmd/thawr client up --server https://127.0.0.1:8443 --token $THAWR_TOKEN
                    # (enrols when needed, then runs the sync daemon; client status|ping|down|rotate-key talk to its socket)
 make integration   # go test -race -tags integration ./tests/... (Linux, needs CAP_NET_ADMIN)
+                   # thawr admin policy check|reload|show talk to the server over the admin socket
 make proto         # regenerate gRPC/protobuf code (buf + plugins via go run, nothing to install)
 ```
 

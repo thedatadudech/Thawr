@@ -34,7 +34,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestSubcommandsWithoutActionShowHelp(t *testing.T) {
-	for _, name := range []string{"client", "admin", "admin user", "admin token", "admin peer"} {
+	for _, name := range []string{"client", "admin", "admin user", "admin token", "admin peer", "admin policy"} {
 		t.Run(name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
 			root := newRootCmd(&out, &errOut)

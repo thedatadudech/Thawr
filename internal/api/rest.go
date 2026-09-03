@@ -28,7 +28,9 @@ type RESTDeps struct {
 	// NodeAuth and Relay enable GET /relay; without both it answers 501.
 	NodeAuth NodeAuth
 	Relay    RelaySession
-	Join     JoinInfo
+	// Policy enables the policy endpoints.
+	Policy PolicyService
+	Join   JoinInfo
 	// Sessions backs cookie logins on the HTTPS listener.
 	Sessions *Sessions
 	// Local marks the admin-socket handler: every request acts as the
@@ -81,6 +83,11 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		mux.HandleFunc("GET /api/v1/peers/{name}", h.requireAuth(h.handleGetPeer))
 		mux.HandleFunc("PATCH /api/v1/peers/{name}", h.requireAuth(h.handleRenamePeer))
 		mux.HandleFunc("DELETE /api/v1/peers/{name}", h.requireAuth(h.handleDeletePeer))
+		if deps.Policy != nil {
+			mux.HandleFunc("GET /api/v1/policy", h.requireAuth(h.handleShowPolicy))
+			mux.HandleFunc("POST /api/v1/policy/check", h.requireAdmin(h.handleCheckPolicy))
+			mux.HandleFunc("POST /api/v1/policy/reload", h.requireAdmin(h.handleReloadPolicy))
+		}
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")

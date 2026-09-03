@@ -4,6 +4,7 @@ package wgtest
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"sync"
 
 	"github.com/thedatadudech/thawr/internal/wg"
@@ -22,9 +23,13 @@ type Fake struct {
 	StatsResult []wg.PeerStats
 	// ConfigureErr, when set, is returned by Configure.
 	ConfigureErr error
-	closed       bool
-	name         string
-	current      wg.Config
+	// Filters holds every filter set installed, oldest first; Drops is
+	// reported by FilterStats.
+	Filters []wg.FilterSet
+	Drops   uint64
+	closed  bool
+	name    string
+	current wg.Config
 }
 
 // New returns a Fake named name.
@@ -130,6 +135,40 @@ func (f *Fake) Peers() []wg.Peer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return cloneConfig(f.current).Peers
+}
+
+// SetFilter records the filter set.
+func (f *Fake) SetFilter(_ context.Context, set wg.FilterSet) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return errors.New("wgtest: set filter after close")
+	}
+	set.Visible = append([]netip.Addr(nil), set.Visible...)
+	set.Rules = append([]wg.FilterRule(nil), set.Rules...)
+	f.Filters = append(f.Filters, set)
+	return nil
+}
+
+// FilterStats reports the last filter set's rule count and Drops.
+func (f *Fake) FilterStats() wg.FilterStats {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := wg.FilterStats{Drops: f.Drops}
+	if n := len(f.Filters); n > 0 {
+		st.Rules = len(f.Filters[n-1].Rules)
+	}
+	return st
+}
+
+// LastFilter returns the most recent filter set and whether one exists.
+func (f *Fake) LastFilter() (wg.FilterSet, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.Filters) == 0 {
+		return wg.FilterSet{}, false
+	}
+	return f.Filters[len(f.Filters)-1], true
 }
 
 // Backend reports "fake".

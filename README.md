@@ -31,7 +31,10 @@ tracked in `TASKS.md`.
 - SQLite embedded; the whole server state is one directory.
 - Local users and one-time enrollment tokens. No identity provider
   required. OIDC optional.
-- A YAML policy file you keep in git. Default deny.
+- A YAML policy file you keep in git. Default deny: peers without a
+  rule cannot see each other, and the receiving peer filters ports
+  (nftables with kernel WireGuard, a userspace filter otherwise).
+  `thawr admin policy check`, `reload` and `show` manage it live.
 - Phones use the official WireGuard app via a QR code.
 - Nothing phones home. It starts and runs with no internet access.
 

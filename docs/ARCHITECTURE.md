@@ -297,16 +297,33 @@ other when either direction is non-empty. Enforcement:
 1. Key distribution: a client only receives keys of visible peers. This
    alone stops any traffic between peers with no relationship.
 2. Receiver-side filter: the destination client drops packets from source
-   overlay addresses not permitted for that proto/port. On Linux with
-   kernel WireGuard this is an nftables table `thawr` with a chain on
-   `thawr0`; with `wireguard-go` it is a userspace stateful filter in the
-   TUN read path. Return traffic of accepted flows is allowed (stateful).
-3. Hub-side filter: the server applies the same rules when forwarding for
-   `static` peers.
+   overlay addresses not permitted for that proto/port, installed from
+   `netmap.filter` on every map. On Linux with kernel WireGuard this is
+   the nftables table `inet thawr` with a drop-policy chain on the input
+   hook: `iifname != thawr0 accept`, `ct state established,related
+   accept`, ICMP echo from the visible set, one rule per policy entry,
+   a counting drop; every change rebuilds the table in one batch. With
+   `wireguard-go` it is a userspace filter between the device and the
+   TUN: outbound packets record flows (UDP 120 s idle, TCP an hour or
+   30 s after FIN/RST, ICMP echo by identifier), inbound packets must
+   answer a flow, be an ICMP diagnostic from a visible peer or match a
+   rule. Drops are counted and shown in `client status`.
+3. Hub-side filter: the server applies the same rules on the forward
+   hook of its hub interface for `static` peers (spec 008).
 
-The server reloads the policy on `SIGHUP`, on `thawr admin policy reload`,
-and validates with `thawr admin policy check file.yaml`. An invalid file
-never replaces a valid loaded policy. Spec 006.
+Compilation resolves every rule to source and destination bitsets over
+the peer list (`self` is checked per pair by owner) and answers
+`Allowed`, `Visible`, `FilterFor` and `MayUseTag`; the server caches it
+per (policy hash, persisted generation). Validation against the
+registry treats unknown users and groups as errors and unknown tags and
+peers as warnings. `tagOwners` is enforced when members create tokens.
+The server reloads the policy on `SIGHUP`, on `thawr admin policy
+reload` and on `POST /api/v1/policy/reload`; an invalid file never
+replaces the running policy and the errors name the rule index and
+field; a successful reload bumps the generation so every client gets a
+new map and filter within seconds. `thawr admin policy check file.yaml`
+validates against the running server without installing; `show` prints
+the effective policy with its hash. Spec 006.
 
 ### 4.7 Mobile (static) peers
 

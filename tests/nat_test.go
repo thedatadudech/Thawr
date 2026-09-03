@@ -142,6 +142,10 @@ type clientStatus struct {
 		Connected bool `json:"connected"`
 		Peers     int  `json:"peers"`
 	} `json:"relay"`
+	Filter *struct {
+		Rules int    `json:"rules"`
+		Drops uint64 `json:"drops"`
+	} `json:"filter"`
 	Peers []struct {
 		Name         string   `json:"name"`
 		IPv4         string   `json:"ipv4"`
