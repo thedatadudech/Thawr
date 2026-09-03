@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package thawr.v1;
+
+option go_package = "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1";
+
+// Control is the client-to-server control channel.
+// Spec 002 adds Enroll; spec 003 adds Sync, ReportEndpoints, RotateKey
+// and Leave.
+service Control {
+  // Enroll registers a new agent peer with a one-time token.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+// EnrollRequest carries the token and the client's identity.
+message EnrollRequest {
+  // token is the one-time enrollment secret (thawr_...).
+  string token = 1;
+  // public_key is the client's WireGuard public key, base64.
+  string public_key = 2;
+  string hostname = 3;
+  string os = 4;
+  string arch = 5;
+  string client_version = 6;
+  // name optionally requests a peer name; the token's name or the
+  // hostname is used otherwise.
+  string name = 7;
+}
+
+// EnrollResponse is returned once; node_secret is never shown again.
+message EnrollResponse {
+  string peer_id = 1;
+  string name = 2;
+  string ipv4 = 3;
+  string overlay_cidr = 4;
+  string node_secret = 5;
+  string hub_public_key = 6;
+  string hub_endpoint = 7;
+  string server_version = 8;
+  int64 netmap_generation = 9;
+}
