@@ -24,6 +24,10 @@ var ErrUnauthorized = errors.New("relay: node secret rejected")
 // the client uses for every server connection; HTTP/1.1 is forced
 // because Go's server only hands out hijacked connections there.
 func Dial(ctx context.Context, serverURL string, tlsCfg *tls.Config, nodeSecret string) (net.Conn, error) {
+	if !strings.Contains(serverURL, "://") {
+		// The enrollment state keeps the server as host:port.
+		serverURL = "https://" + serverURL
+	}
 	u, err := url.Parse(serverURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("relay: server url %q: %w", serverURL, err)
