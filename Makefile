@@ -40,10 +40,10 @@ run-server: build
 run-client: build
 	$(BINARY) client up --server $(THAWR_SERVER) --token $(THAWR_TOKEN)
 
-# Regenerates gRPC and protobuf code once internal/api/proto exists (spec 002).
+# Regenerates gRPC and protobuf code. buf and the Go plugins run through
+# `go run` with pinned versions, so nothing needs to be installed.
 proto:
-	@test -d internal/api/proto || { echo "internal/api/proto does not exist yet"; exit 1; }
-	$(GO) generate ./internal/api/...
+	cd internal/api/proto && $(GO) run github.com/bufbuild/buf/cmd/buf@v1.57.2 generate
 
 clean:
 	rm -rf bin dist

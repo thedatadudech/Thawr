@@ -32,7 +32,7 @@ func TestStatusEndpoint(t *testing.T) {
 	want := Status{Version: "1.2.3", UptimeSeconds: 42, PeerCount: 3, NetmapGeneration: 7, TLSFingerprint: "sha256:ab", HubPublicKey: "k"}
 	h := newTestHandler(t, fakeStatus{st: want})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/status", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/status", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status code %d", rec.Code)
 	}
@@ -51,7 +51,7 @@ func TestStatusEndpoint(t *testing.T) {
 func TestStatusEndpointError(t *testing.T) {
 	h := newTestHandler(t, fakeStatus{err: errors.New("db down")})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/status", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/status", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status code %d", rec.Code)
 	}
@@ -63,7 +63,7 @@ func TestStatusEndpointError(t *testing.T) {
 func TestStatusMethodNotAllowed(t *testing.T) {
 	h := newTestHandler(t, fakeStatus{})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/status", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/status", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status code %d, want 405", rec.Code)
 	}
@@ -72,7 +72,7 @@ func TestStatusMethodNotAllowed(t *testing.T) {
 func TestUnknownAPIRoute(t *testing.T) {
 	h := newTestHandler(t, fakeStatus{})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/nope", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/nope", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status code %d, want 404", rec.Code)
 	}
@@ -81,7 +81,7 @@ func TestUnknownAPIRoute(t *testing.T) {
 func TestRelayNotImplemented(t *testing.T) {
 	h := newTestHandler(t, fakeStatus{})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/relay", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/relay", nil))
 	if rec.Code != http.StatusNotImplemented {
 		t.Errorf("status code %d, want 501", rec.Code)
 	}
@@ -90,7 +90,7 @@ func TestRelayNotImplemented(t *testing.T) {
 func TestUIServed(t *testing.T) {
 	h := newTestHandler(t, fakeStatus{})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Thawr") {
 		t.Errorf("UI: code %d body %q", rec.Code, rec.Body.String())
 	}

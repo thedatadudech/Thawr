@@ -8,17 +8,33 @@ import (
 	"net/http"
 )
 
-// RESTDeps are the collaborators of the REST handler.
+// RESTDeps are the collaborators of the REST handler. Users, Tokens and
+// Peers may be nil for a status-only handler (tests); then every
+// management endpoint answers 503.
 type RESTDeps struct {
 	Status StatusSource
 	// UI is the embedded admin UI root (index.html at the top).
 	UI     fs.FS
 	Logger *slog.Logger
+
+	Users  UsersService
+	Auth   Authenticator
+	Tokens TokensService
+	Peers  PeersService
+	Join   JoinInfo
+	// Sessions backs cookie logins on the HTTPS listener.
+	Sessions *Sessions
+	// Local marks the admin-socket handler: every request acts as the
+	// local admin and login is disabled.
+	Local bool
+}
+
+type rest struct {
+	deps RESTDeps
 }
 
 // NewREST returns the HTTP handler for the admin API, the embedded UI
-// and the relay upgrade path. It serves both the HTTPS listener and the
-// local admin socket.
+// and the relay upgrade path. Build it once per listener.
 func NewREST(deps RESTDeps) (http.Handler, error) {
 	if deps.Status == nil {
 		return nil, fmt.Errorf("api: StatusSource required")
@@ -29,6 +45,7 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
+	h := &rest{deps: deps}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -44,6 +61,20 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		}
 		writeJSON(w, http.StatusOK, st)
 	})
+	if deps.Users != nil && deps.Tokens != nil && deps.Peers != nil {
+		mux.HandleFunc("POST /api/v1/login", h.handleLogin)
+		mux.HandleFunc("POST /api/v1/logout", h.handleLogout)
+		mux.HandleFunc("GET /api/v1/me", h.requireAuth(h.handleMe))
+		mux.HandleFunc("GET /api/v1/users", h.requireAdmin(h.handleListUsers))
+		mux.HandleFunc("POST /api/v1/users", h.requireAdmin(h.handleCreateUser))
+		mux.HandleFunc("GET /api/v1/tokens", h.requireAuth(h.handleListTokens))
+		mux.HandleFunc("POST /api/v1/tokens", h.requireAuth(h.handleCreateToken))
+		mux.HandleFunc("DELETE /api/v1/tokens/{id}", h.requireAuth(h.handleRevokeToken))
+		mux.HandleFunc("GET /api/v1/peers", h.requireAuth(h.handleListPeers))
+		mux.HandleFunc("GET /api/v1/peers/{name}", h.requireAuth(h.handleGetPeer))
+		mux.HandleFunc("PATCH /api/v1/peers/{name}", h.requireAuth(h.handleRenamePeer))
+		mux.HandleFunc("DELETE /api/v1/peers/{name}", h.requireAuth(h.handleDeletePeer))
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown endpoint")
 	})

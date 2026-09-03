@@ -341,16 +341,21 @@ func TestCheckDoesNotTouchDataDir(t *testing.T) {
 	}
 }
 
-// getStatus fetches /api/v1/status over the admin socket and returns the
-// status code and body.
-func getStatus(t *testing.T, socket string) (int, []byte) {
-	t.Helper()
-	client := &http.Client{Transport: &http.Transport{
+// unixHTTPClient talks HTTP over the admin socket.
+func unixHTTPClient(socket string) *http.Client {
+	return &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", socket)
 		},
 	}}
+}
+
+// getStatus fetches /api/v1/status over the admin socket and returns the
+// status code and body.
+func getStatus(t *testing.T, socket string) (int, []byte) {
+	t.Helper()
+	client := unixHTTPClient(socket)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://thawr/api/v1/status", nil)

@@ -47,10 +47,34 @@ entry.
         real binary was booted manually there with userspace WireGuard
         and verified: files and modes, status over the socket, SIGTERM
         exit 0.
-- [ ] **002 Peer enrollment** — `docs/specs/002-peer-enrollment.md`
+- [x] **002 Peer enrollment** — `docs/specs/002-peer-enrollment.md`
       Users (argon2id), one-time tokens, `Enroll` RPC, IP allocator,
       peer registry, admin CLI + REST + UI list/create, `client up`
       with fingerprint pinning.
+      - New package `internal/client` (state dir, pinning, Enroll);
+        `cmd/thawr` stays flags only.
+      - gRPC and REST share the HTTPS listener via `api.Combine`
+        (`grpc.Server.ServeHTTP` on HTTP/2 `application/grpc`).
+      - Protobuf generated with buf and the Go plugins through `go run`
+        at pinned versions; generated code is committed.
+      - Browser sessions are in memory (12 h); the CSRF token travels in
+        the login and `/me` responses, not a cookie, so the only cookie
+        is HttpOnly. The admin socket acts as the local admin.
+      - Login limiter: 10 failures per user per 15 min, then exponential
+        backoff; Enroll: 10 attempts per minute per remote IP.
+      - `client up` probes the server certificate and compares it with
+        `--fingerprint` before sending anything; `--accept-fingerprint`
+        is the explicit trust-on-first-use path. It exits after
+        enrolling; the daemon is spec 003.
+      - `min_client_version` compares MAJOR.MINOR; non-numeric versions
+        (`dev`, git describe) are accepted.
+      - REST addresses peers by name (`/peers/{name}`) because names are
+        unique and what the CLI uses.
+      - `go.mod` is on Go 1.26 (pulled in by grpc / golang.org/x);
+        golangci-lint moved to v2.13.2 for the same reason.
+      - The two-client netns integration test skips without root and
+        iproute2 (not run in the development container); the CLI flow
+        was exercised manually against the real binary instead.
 - [ ] **003 Key distribution** — `docs/specs/003-key-distribution.md`
       Netmap builder, `Sync` stream, endpoint table, `wg.Device`
       kernel + userspace adapters, client daemon with cached netmap,

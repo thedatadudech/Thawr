@@ -43,10 +43,10 @@ func TestServerBootsInNetns(t *testing.T) {
 	if !strings.Contains(logs, "backend=") {
 		t.Errorf("no wireguard backend logged:\n%s", logs)
 	}
-	if out := ns.run(t, "ip", "-o", "link", "show", "thawr0"); !strings.Contains(out, "thawr0") {
+	if out := ns.ip(t, "-o", "link", "show", "thawr0"); !strings.Contains(out, "thawr0") {
 		t.Errorf("thawr0 missing inside namespace: %s", out)
 	}
-	if out := ns.run(t, "ip", "-o", "addr", "show", "thawr0"); !strings.Contains(out, "100.64.0.1/10") {
+	if out := ns.ip(t, "-o", "addr", "show", "thawr0"); !strings.Contains(out, "100.64.0.1/10") {
 		t.Errorf("hub address missing: %s", out)
 	}
 

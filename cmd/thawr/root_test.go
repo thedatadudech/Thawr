@@ -33,16 +33,29 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-func TestUnimplementedSubcommands(t *testing.T) {
-	for _, name := range []string{"client", "admin"} {
+func TestSubcommandsWithoutActionShowHelp(t *testing.T) {
+	for _, name := range []string{"client", "admin", "admin user", "admin token", "admin peer"} {
 		t.Run(name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
 			root := newRootCmd(&out, &errOut)
-			root.SetArgs([]string{name})
-			err := root.Execute()
-			if !errors.Is(err, errNotImplemented) {
-				t.Fatalf("got %v, want errNotImplemented", err)
+			root.SetArgs(strings.Fields(name))
+			if err := root.Execute(); err != nil {
+				t.Fatalf("got %v, want help without error", err)
+			}
+			if !strings.Contains(out.String(), "Usage:") {
+				t.Errorf("no usage printed:\n%s", out.String())
 			}
 		})
+	}
+}
+
+func TestClientUpRequiresFlags(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := newRootCmd(&out, &errOut)
+	root.SetArgs([]string{"client", "up"})
+	err := root.Execute()
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != exitConfigError {
+		t.Fatalf("got %v, want exit code %d", err, exitConfigError)
 	}
 }

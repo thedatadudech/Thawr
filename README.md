@@ -35,7 +35,7 @@ tracked in `TASKS.md`.
 - Phones use the official WireGuard app via a QR code.
 - Nothing phones home. It starts and runs with no internet access.
 
-## Quick start (target UX; not functional until Sprint 1 is done)
+## Quick start (server bootstrap and enrollment work; connectivity lands with spec 003)
 
 Server, on a host with a public address:
 
@@ -62,7 +62,7 @@ Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 
 ## Building
 
-Requires Go 1.25 or newer. No CGO, no Node.
+Requires Go 1.26 or newer. No CGO, no Node.
 
 ```
 make build      # bin/thawr
