@@ -62,8 +62,10 @@ thawr client ping <peer>
 interface in sync with the server until stopped. Peers find each other
 through STUN and WireGuard hole punching: same-LAN addresses first, then
 the public address behind the router; `client ping` shows the path in
-use. Two devices behind symmetric NATs need the relay, which follows in
-the next spec.
+use. When no direct path exists (two symmetric NATs, a strict
+firewall) the packets go through the relay built into the server, still
+end-to-end encrypted, and the path upgrades to `direct` on its own when
+the network allows it.
 
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 (STUN), UDP 51820 (WireGuard hub for phones).

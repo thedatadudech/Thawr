@@ -150,9 +150,36 @@ entry.
         went probing to direct in 0.3 s, the other side followed by
         roaming, the server showed the path; no secrets in logs. The
         netns NAT tests skip here (no `ip`, no `nft`).
-- [ ] **005 Relay fallback** — `docs/specs/005-relay-fallback.md`
+- [x] **005 Relay fallback** — `docs/specs/005-relay-fallback.md`
       Frame protocol, relay server with visibility check, client proxy
       sockets, relay→direct upgrade.
+      - Re-probing from `relay` tries one candidate per 60 s (the next in
+        turn) and returns to the relay after its 2 s window, so a failed
+        retry costs at most one window of loss; a candidate change still
+        starts a full simultaneous round. Switching the endpoint without
+        a re-add and watching rx was rejected: roaming on both sides makes
+        the endpoints ping-pong between proxy and candidate.
+      - Loopback endpoints from `Stats` (sink or relay proxy) are masked
+        before stepping the machine, so a rekey through the relay never
+        looks like a direct handshake.
+      - The relay checks the first payload byte for a WireGuard message
+        type on both ends; the server drops and counts anything else.
+      - The relay dial forces HTTP/1.1 (Go's server hijacks only there);
+        gRPC stays on h2. The enrollment state stores the server as
+        host:port, which `relay.Dial` accepts.
+      - Visibility for the relay is `control.KeyVisibility` (peers by
+        public key, cached per netmap generation); the registry-follow
+        loop also prunes sessions of deleted peers.
+      - `relay.max_bytes_per_second` is a per-session token bucket with a
+        one-second burst; queue overflow and violations are counted and
+        all counters sit under `relay` in `/api/v1/status`.
+      - The relay connection opens on the first proxy and closes after
+        5 min without one; a proxy lives 10 s past its release.
+      - Verified on this box with the real binary: `/relay` answers 401
+        without or with a wrong secret and 101 with the node secret, the
+        status endpoint carries the relay counters, two on-host clients
+        still reach `direct`, no secrets or payload bytes in logs. The
+        netns relay tests skip here (no `ip`, `nft`, `conntrack`, `iperf3`).
 - [ ] **006 ACL policy** — `docs/specs/006-acl-policy.md`
       Policy parse/validate/compile, visibility, nftables filter,
       userspace filter, hub-side filter, `admin policy` commands.
