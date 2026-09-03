@@ -109,9 +109,47 @@ entry.
 
 ## Sprint 2 — connectivity, policy, UX
 
-- [ ] **004 Direct connectivity** — `docs/specs/004-direct-connectivity.md`
+- [x] **004 Direct connectivity** — `docs/specs/004-direct-connectivity.md`
       STUN server + client, candidate ordering, path state machine, hole
       punching via WireGuard handshakes, NAT netns tests.
+      - `internal/stun` is the Tailscale codec (BSD-3, D2) with Thawr's
+        own SOFTWARE tag; the server answers only Thawr clients, 20 req/s
+        per source IP.
+      - STUN from the WireGuard port only works with `wireguard-go` (a
+        `conn.Bind` wrapper); the kernel module's socket cannot be shared
+        (bound without SO_REUSEADDR/SO_REUSEPORT), so kernel clients STUN
+        from an ephemeral socket (public IP + symmetric verdict, port
+        assumed preserved) and the server adds the hub-observed mapping
+        of each peer as a reflexive candidate (`EndpointTable.SetObserved`).
+      - `wg.Device.Configure` now diffs peers instead of replacing them
+        (replace_peers drops every session on both kernel and
+        wireguard-go); `SetPeer`/`RemovePeer` added. A probe removes and
+        re-adds the peer so each 2 s window gets a fresh handshake
+        initiation (WireGuard otherwise retries every 5 s).
+      - Netmaps set no mesh-peer endpoint; the prober owns it. Idle peers
+        point at a per-peer loopback sink socket that reveals traffic
+        intent without transmitting (the same mechanism spec 005's relay
+        proxy uses).
+      - The probe trigger is one UDP datagram to the peer's overlay
+        address on port 9, bound to the WireGuard interface
+        (SO_BINDTODEVICE / IP_BOUND_IF), not an ICMP echo: no raw socket,
+        same handshake effect.
+      - Candidate kinds travel in the client netmap cache
+        (`endpoints: [{addr, kind}]`); an old cache is ignored with a
+        warning. Local candidates inside the overlay and loopback
+        reflexive mappings are dropped before reporting.
+      - `POST /ping/{name}` and `thawr client ping <peer>` exist now in a
+        minimal JSON form; spec 007 formats them. Peer detail in the admin
+        API and UI lists reported paths.
+      - Linux masquerade is port-restricted, so the cone/symmetric case
+        needs a full-cone NAT (catch-all DNAT) in `tests/nat_test.go`; a
+        port-restricted cone facing a symmetric NAT cannot be punched
+        without port prediction (out of scope).
+      - Verified on this box with the real binary: STUN through the
+        wireguard-go bind, idle peers with zero probes, `client ping`
+        went probing to direct in 0.3 s, the other side followed by
+        roaming, the server showed the path; no secrets in logs. The
+        netns NAT tests skip here (no `ip`, no `nft`).
 - [ ] **005 Relay fallback** — `docs/specs/005-relay-fallback.md`
       Frame protocol, relay server with visibility check, client proxy
       sockets, relay→direct upgrade.

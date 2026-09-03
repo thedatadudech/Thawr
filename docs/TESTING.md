@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping | Linux, root, iproute2 |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`) | Linux, root, iproute2, nftables |
 
 The integration tests use the real binary and the WireGuard adapter that
 `wg.Open` selects on the host: the kernel module when it loads, else
@@ -51,3 +51,21 @@ in the pull request.
 
 If a step fails, the adapter code for that platform in `internal/wg`
 (`addr_<os>.go`) is the place to look.
+
+## Manual checklist for NAT traversal (spec 004)
+
+Two devices behind different home routers, server on a public host.
+
+1. `thawr client status` on each device lists its own `endpoints`: a
+   LAN address and a reflexive address with the router's public IP;
+   `symmetric` is `false` on ordinary routers.
+2. The peer shows `path: idle` and `probes: 0` until traffic flows.
+3. `thawr client ping <peer>` returns `direct` within 10 s with the
+   peer's public `ip:port`; `ping` over the overlay works and the other
+   device shows `direct` as well.
+4. On a symmetric NAT (many carrier-grade NATs) the device reports
+   `symmetric: true`; two such devices end at `unreachable` until the
+   relay (spec 005).
+5. Two devices on the same LAN pick the LAN address as the path
+   endpoint even though both have reflexive candidates.
+6. The admin UI's "Show" under a peer lists the paths it reported.
