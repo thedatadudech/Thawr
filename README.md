@@ -1,9 +1,9 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-    <img alt="Thawr" src="docs/assets/logo-light.svg" width="320">
-  </picture>
-</p>
+<div align="center">
+
+![Thawr](docs/assets/logo-dark.svg#gh-dark-mode-only)
+![Thawr](docs/assets/logo-light.svg#gh-light-mode-only)
+
+</div>
 
 # Thawr
 
