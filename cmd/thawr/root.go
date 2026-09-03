@@ -27,18 +27,6 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	return root
 }
 
-func newServerCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "server",
-		Short: "Run the control server (registry, STUN, relay, admin UI)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return fmt.Errorf("server: %w (docs/specs/001-server-bootstrap.md)", errNotImplemented)
-		},
-	}
-	cmd.Flags().String("config", "", "path to the server YAML config")
-	return cmd
-}
-
 func newClientCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "client",

@@ -35,7 +35,7 @@ make proto         # regenerate gRPC/protobuf code in internal/api/proto
 ```
 
 Single package: `go test -race -run TestName ./internal/control/...`.
-Toolchain: Go 1.24 or newer; `go.mod` pins the minimum. No CGO anywhere
+Toolchain: Go 1.25 or newer; `go.mod` pins the minimum. No CGO anywhere
 (`CGO_ENABLED=0` must build the whole binary).
 
 ## Repository layout
@@ -48,6 +48,7 @@ internal/wg/        WireGuard adapter: kernel (wgctrl) and wireguard-go
 internal/store/     SQLite persistence and embedded SQL migrations
 internal/api/       gRPC (client<->server) and REST (admin UI) handlers
 internal/config/    YAML loading, validation, defaults
+internal/server/    composes the server: bootstrap order, readiness, reload, shutdown
 web/                admin UI: plain HTML/JS, embedded via embed.FS
 docs/               vision, architecture, ADRs, threat model, specs
 tests/              integration tests (netns-based)
@@ -106,8 +107,8 @@ These are not up for discussion inside an implementation session.
    logic is non-obvious. TODOs are written `TODO(YYYY-MM-DD): text`.
 8. Unit tests for all control-plane logic (`internal/control`,
    `internal/store`, `internal/config`, `internal/api`). Table-driven
-   where natural. Use the in-memory SQLite (`file::memory:?cache=shared`)
-   in store tests.
+   where natural. Store tests open a SQLite file in `t.TempDir()`; the
+   shared-cache in-memory DSN misbehaves under `database/sql` pooling.
 9. Platform-specific code lives in `_linux.go`, `_darwin.go`,
    `_windows.go` files with a shared interface; the rest of the tree must
    compile and test on all three.

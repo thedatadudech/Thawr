@@ -1,0 +1,112 @@
+package config
+
+import (
+	"fmt"
+	"net"
+	"net/netip"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// ValidationError lists every problem found in a Config, one per field,
+// so an operator can fix them all in one pass.
+type ValidationError struct {
+	Problems []string
+}
+
+func (e *ValidationError) Error() string {
+	return "config: " + strings.Join(e.Problems, "; ")
+}
+
+var versionRe = regexp.MustCompile(`^\d+\.\d+$`)
+
+// Validate checks every field and returns a *ValidationError listing all
+// problems, or nil.
+func (c *Config) Validate() error {
+	var v ValidationError
+	add := func(format string, args ...any) {
+		v.Problems = append(v.Problems, fmt.Sprintf(format, args...))
+	}
+
+	if c.PublicAddr == "" {
+		add("public_addr: required")
+	} else if host := c.PublicHost(); host == "" {
+		add("public_addr: %q has no host", c.PublicAddr)
+	} else if _, port, err := net.SplitHostPort(c.PublicAddr); err == nil {
+		if _, perr := strconv.ParseUint(port, 10, 16); perr != nil {
+			add("public_addr: port %q is not a number in 0-65535", port)
+		}
+	}
+
+	if c.DataDir == "" {
+		add("data_dir: required")
+	}
+
+	checkListen := func(key, addr string) {
+		if _, port, err := net.SplitHostPort(addr); err != nil {
+			add("%s: %q is not host:port", key, addr)
+		} else if _, perr := strconv.ParseUint(port, 10, 16); perr != nil {
+			add("%s: port %q is not a number in 0-65535", key, port)
+		}
+	}
+	checkListen("listen.https", c.Listen.HTTPS)
+	checkListen("listen.wireguard", c.Listen.WireGuard)
+	switch n := len(c.Listen.STUN); {
+	case n == 0:
+		add("listen.stun: at least one address required")
+	case n > 2:
+		add("listen.stun: at most two addresses, got %d", n)
+	}
+	for i, a := range c.Listen.STUN {
+		checkListen(fmt.Sprintf("listen.stun[%d]", i), a)
+	}
+
+	if p, err := netip.ParsePrefix(c.Overlay.CIDR); err != nil {
+		add("overlay.cidr: %q is not a CIDR", c.Overlay.CIDR)
+	} else if !p.Addr().Is4() {
+		add("overlay.cidr: only IPv4 is supported in v1")
+	} else if p.Bits() > 30 {
+		add("overlay.cidr: prefix must be /30 or larger to hold a hub and peers")
+	}
+	if c.Overlay.Interface == "" || len(c.Overlay.Interface) > 15 || strings.ContainsAny(c.Overlay.Interface, " /") {
+		add("overlay.interface: %q must be 1-15 characters without spaces or slashes", c.Overlay.Interface)
+	}
+
+	switch c.TLS.Mode {
+	case TLSModeSelfSigned:
+	case TLSModeFile:
+		if c.TLS.CertFile == "" {
+			add("tls.cert_file: required when tls.mode is file")
+		}
+		if c.TLS.KeyFile == "" {
+			add("tls.key_file: required when tls.mode is file")
+		}
+	default:
+		add("tls.mode: %q must be self-signed or file", c.TLS.Mode)
+	}
+
+	if c.AdminSocket == "" {
+		add("admin_socket: required")
+	}
+
+	switch strings.ToLower(c.Log.Level) {
+	case "debug", "info", "warn", "error":
+	default:
+		add("log.level: %q must be debug, info, warn or error", c.Log.Level)
+	}
+	switch c.Log.Format {
+	case "text", "json":
+	default:
+		add("log.format: %q must be text or json", c.Log.Format)
+	}
+
+	if c.MinClientVersion != "" && !versionRe.MatchString(c.MinClientVersion) {
+		add("min_client_version: %q must be MAJOR.MINOR", c.MinClientVersion)
+	}
+
+	if len(v.Problems) > 0 {
+		return &v
+	}
+	return nil
+}

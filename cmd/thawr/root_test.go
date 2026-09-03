@@ -34,7 +34,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestUnimplementedSubcommands(t *testing.T) {
-	for _, name := range []string{"server", "client", "admin"} {
+	for _, name := range []string{"client", "admin"} {
 		t.Run(name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
 			root := newRootCmd(&out, &errOut)
