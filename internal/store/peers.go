@@ -210,3 +210,45 @@ func escapeLike(s string) string {
 	}
 	return string(out)
 }
+
+// SetPublicKey replaces a peer's WireGuard key. ErrConflict if another
+// peer holds it, ErrNotFound if the peer is gone.
+func (s *Peers) SetPublicKey(ctx context.Context, id, publicKey string) error {
+	res, err := s.q.ExecContext(ctx, `UPDATE peers SET public_key = ? WHERE id = ?`, publicKey, id)
+	if isUniqueViolation(err) {
+		return fmt.Errorf("public key: %w", ErrConflict)
+	}
+	if err != nil {
+		return fmt.Errorf("store: set public key of %s: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("peer %s: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
+// Touch sets last_seen_at.
+func (s *Peers) Touch(ctx context.Context, id string, at time.Time) error {
+	if _, err := s.q.ExecContext(ctx, `UPDATE peers SET last_seen_at = ? WHERE id = ?`, formatTime(at), id); err != nil {
+		return fmt.Errorf("store: touch peer %s: %w", id, err)
+	}
+	return nil
+}
+
+// ListByMode returns peers of one mode ordered by name.
+func (s *Peers) ListByMode(ctx context.Context, mode string) ([]Peer, error) {
+	rows, err := s.q.QueryContext(ctx, `SELECT `+peerColumns+` FROM peers WHERE mode = ? ORDER BY name`, mode)
+	if err != nil {
+		return nil, fmt.Errorf("store: list peers by mode: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Peer
+	for rows.Next() {
+		p, err := scanPeer(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan peer: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

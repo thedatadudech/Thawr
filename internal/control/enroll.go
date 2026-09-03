@@ -48,6 +48,13 @@ type Enroller struct {
 	overlay    netip.Prefix
 	minVersion string
 	limit      *rateLimit
+	notify     Notifier
+}
+
+// WithNotifier sets the notifier told after each enrollment.
+func (e *Enroller) WithNotifier(n Notifier) *Enroller {
+	e.notify = n
+	return e
 }
 
 // NewEnroller builds the enrollment service. minVersion is MAJOR.MINOR
@@ -74,9 +81,9 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 	if err := checkVersion(req.ClientVersion, e.minVersion); err != nil {
 		return EnrollResult{}, err
 	}
-	pub, err := wg.ParseKey(req.PublicKey)
+	pub, err := parsePublicKey(req.PublicKey)
 	if err != nil {
-		return EnrollResult{}, fmt.Errorf("%w: public_key is not a WireGuard key", ErrValidation)
+		return EnrollResult{}, err
 	}
 	if len(req.Hostname) > 63 {
 		return EnrollResult{}, fmt.Errorf("%w: hostname longer than 63 characters", ErrValidation)
@@ -179,6 +186,9 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 	if err != nil {
 		return EnrollResult{}, err
 	}
+	if e.notify != nil {
+		e.notify.Changed()
+	}
 	return result, nil
 }
 
@@ -214,4 +224,13 @@ func parseMajorMinor(v string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return maj, minor, true
+}
+
+// parsePublicKey validates a base64 WireGuard public key.
+func parsePublicKey(s string) (wg.Key, error) {
+	k, err := wg.ParseKey(s)
+	if err != nil {
+		return wg.Key{}, fmt.Errorf("%w: public_key is not a WireGuard key", ErrValidation)
+	}
+	return k, nil
 }
