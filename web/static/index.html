@@ -61,6 +61,22 @@
         <tbody></tbody>
       </table>
 
+      <section id="policy-section" hidden>
+        <h2>Policy</h2>
+        <p id="policy-summary" class="muted"></p>
+        <ul id="policy-warnings" class="warnings"></ul>
+        <pre id="policy-source"></pre>
+        <div class="row">
+          <button id="policy-reload" class="link">Reload from file</button>
+        </div>
+        <h3>Check a policy</h3>
+        <textarea id="policy-input" rows="12" spellcheck="false" placeholder="version: 1&#10;acls:&#10;  - action: accept&#10;    src: [group:devs]&#10;    dst: [&quot;tag:prod:22,443&quot;]"></textarea>
+        <div class="row">
+          <button id="policy-check" class="link">Check</button>
+        </div>
+        <ul id="policy-check-result" class="warnings"></ul>
+      </section>
+
       <section id="users-section" hidden>
         <h2>Users</h2>
         <table id="users">

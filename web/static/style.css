@@ -20,4 +20,9 @@ button.link { background: none; color: var(--accent); border-color: transparent;
 .error { color: var(--err); min-height: 1.2em; margin: .25rem 0 0; grid-column: 1 / -1; font-size: .9rem; }
 .notice { background: var(--notice); border: 1px solid var(--accent); border-radius: 6px; padding: .75rem 1rem; margin-top: 1rem; }
 .notice pre { white-space: pre-wrap; word-break: break-all; margin: .5rem 0; }
+.muted { color: var(--muted, #666); }
+.warnings { padding-left: 1.2rem; font-size: .92rem; }
+.warnings li { margin: .2rem 0; }
+#policy-source { background: var(--panel, #f4f4f4); padding: .6rem; overflow-x: auto; font-size: .88rem; }
+textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .88rem; padding: .5rem; box-sizing: border-box; }
 #login form { display: flex; flex-direction: column; gap: .75rem; max-width: 20rem; }
