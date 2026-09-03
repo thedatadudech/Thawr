@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`) | Linux, root, iproute2, nftables |
 
 The integration tests use the real binary and the WireGuard adapter that
 `wg.Open` selects on the host: the kernel module when it loads, else
@@ -69,3 +69,20 @@ Two devices behind different home routers, server on a public host.
 5. Two devices on the same LAN pick the LAN address as the path
    endpoint even though both have reflexive candidates.
 6. The admin UI's "Show" under a peer lists the paths it reported.
+
+## Manual checklist for the relay (spec 005)
+
+1. Put one device behind a symmetric NAT (a phone hotspot usually is
+   one) and `thawr client ping <peer>`: the JSON says `relay`, `thawr
+   client status` shows `relay.connected: true`, `relay.peers: 1`, and
+   `ping`/SSH over the overlay work.
+2. `/api/v1/status` on the server counts `relay.sessions`, `frames` and
+   `bytes` growing; with `relay.max_bytes_per_second` set low, `drops`
+   grows and the transfer slows.
+3. Restart the server: `status` shows `relay.connected` false, then true
+   again within seconds; traffic resumes without `client down`.
+4. Move the relayed device to an ordinary network: within about a
+   minute the peer reads `direct` and `relay.peers` drops to 0; the
+   relay connection closes five minutes later.
+5. `curl -k https://server/relay` without a token answers 401; the
+   server log never contains payload bytes.

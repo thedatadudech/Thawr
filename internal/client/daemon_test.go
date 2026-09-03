@@ -19,6 +19,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/api"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/path"
+	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/stun"
 	"github.com/thedatadudech/thawr/internal/wg"
@@ -35,6 +36,7 @@ type controlPlane struct {
 	tokens    *control.Tokens
 	endpoints *control.EndpointTable
 	paths     *control.PathTable
+	relay     *relay.Server
 	admin     control.Principal
 	ts        *httptest.Server
 	fp        string
@@ -78,17 +80,28 @@ func newControlPlane(t *testing.T) *controlPlane {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rest, err := api.NewREST(api.RESTDeps{Status: statusStub{}, UI: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}})
+	relaySrv := relay.NewServer(keyVisibility{control.NewKeyVisibility(st, control.OwnerVisibility{}, hub.Generation)}, relay.ServerOptions{Logger: quiet})
+	t.Cleanup(relaySrv.Close)
+	rest, err := api.NewREST(api.RESTDeps{Status: statusStub{}, UI: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}, Logger: quiet, NodeAuth: registry, Relay: relaySrv})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewUnstartedServer(api.Combine(grpcSrv, rest))
 	ts.EnableHTTP2 = true
-	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2"}}
+	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS13, NextProtos: []string{"h2", "http/1.1"}}
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths,
+	return &controlPlane{t: t, st: st, hub: hub, registry: registry, tokens: control.NewTokens(st, time.Now, quiet), endpoints: endpoints, paths: paths, relay: relaySrv,
 		admin: control.Principal{UserID: admin.ID, Name: admin.Name, Role: admin.Role}, ts: ts, fp: Fingerprint(ts.Certificate().Raw), hubKey: hubKey}
+}
+
+// keyVisibility adapts control.KeyVisibility to the relay's key type.
+type keyVisibility struct {
+	kv *control.KeyVisibility
+}
+
+func (v keyVisibility) Visible(ctx context.Context, src, dst relay.Key) (bool, error) {
+	return v.kv.Visible(ctx, wg.Key(src).String(), wg.Key(dst).String())
 }
 
 // enrol registers a device into dir and returns its state.
@@ -132,10 +145,14 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 	t.Helper()
 	fake := wgtest.New("thawr0")
 	socket := shortSocket(t)
+	logOut := io.Discard
+	if os.Getenv("THAWR_TEST_LOG") != "" {
+		logOut = os.Stderr
+	}
 	opts := DaemonOptions{
 		StateDir: dir, Socket: socket, Interface: "thawr0",
 		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "0.1.0",
+		Logger:     slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug})), Version: "0.1.0",
 		MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond, EndpointInterval: time.Hour, LocalPoll: time.Hour,
 		Endpoints: func(port int, _ string) []netip.AddrPort {
 			return []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("192.0.2.10"), uint16(port))}
@@ -144,6 +161,7 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 		Path:      path.Options{ProbeWindow: 100 * time.Millisecond, RetryAfter: 500 * time.Millisecond},
 		ProbeTick: 20 * time.Millisecond, IdleTick: 50 * time.Millisecond,
 		Trigger: func(context.Context, string, netip.Addr, netip.Addr) error { return nil },
+		Relay:   relay.ClientOptions{MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, ReleaseDelay: 20 * time.Millisecond, IdleTimeout: 200 * time.Millisecond},
 	}
 	for _, m := range mods {
 		m(&opts)

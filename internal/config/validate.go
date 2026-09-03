@@ -69,6 +69,9 @@ func (c *Config) Validate() error {
 	} else if p.Bits() > 30 {
 		add("overlay.cidr: prefix must be /30 or larger to hold a hub and peers")
 	}
+	if c.Relay.MaxBytesPerSecond < 0 {
+		add("relay.max_bytes_per_second: must not be negative")
+	}
 	if c.Overlay.Interface == "" || len(c.Overlay.Interface) > 15 || strings.ContainsAny(c.Overlay.Interface, " /") {
 		add("overlay.interface: %q must be 1-15 characters without spaces or slashes", c.Overlay.Interface)
 	}

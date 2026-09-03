@@ -200,3 +200,110 @@ func TestPathStateMachine(t *testing.T) {
 		}
 	})
 }
+
+func TestPathRelayUpgrade(t *testing.T) {
+	t0 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) time.Time { return t0.Add(d) }
+
+	t.Run("exhaustion ends in relay and retries one candidate per period", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates([]netip.AddrPort{c1, c2})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		m.Step(Input{Now: at(2 * time.Second)})
+		out := m.Step(Input{Now: at(4 * time.Second)})
+		if out.State != Relay || out.Action != ActRelay || out.Endpoint.IsValid() || !out.Changed {
+			t.Fatalf("after exhaustion: %+v", out)
+		}
+		if out := m.Step(Input{Now: at(30 * time.Second), Intent: true}); out.Action != ActNone || out.State != Relay {
+			t.Fatalf("early retry: %+v", out)
+		}
+		// A rekey through the relay reports a loopback-free zero endpoint
+		// (the daemon masks the proxy address) and must not look direct.
+		if out := m.Step(Input{Now: at(40 * time.Second), Handshake: at(40 * time.Second)}); out.State != Relay {
+			t.Fatalf("relay rekey looked direct: %+v", out)
+		}
+		out = m.Step(Input{Now: at(65 * time.Second)})
+		if out.Action != ActProbe || out.Endpoint != c1 || out.State != Probing {
+			t.Fatalf("first retry: %+v", out)
+		}
+		out = m.Step(Input{Now: at(67*time.Second + 100*time.Millisecond)})
+		if out.State != Relay || out.Action != ActRelay {
+			t.Fatalf("back to relay: %+v", out)
+		}
+		out = m.Step(Input{Now: at(128 * time.Second)})
+		if out.Action != ActProbe || out.Endpoint != c2 {
+			t.Fatalf("second retry uses the next candidate: %+v", out)
+		}
+		// This retry succeeds.
+		out = m.Step(Input{Now: at(129 * time.Second), Handshake: at(129 * time.Second), Endpoint: c2})
+		if out.State != Direct || out.Endpoint != c2 {
+			t.Fatalf("upgrade: %+v", out)
+		}
+		if m.Probes() != 4 {
+			t.Errorf("probes = %d", m.Probes())
+		}
+	})
+
+	t.Run("peer reaches us while relayed", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates(nil)
+		m.Step(Input{Now: t0})
+		if out := m.Step(Input{Now: t0, Intent: true}); out.State != Relay || m.Probes() != 0 {
+			t.Fatalf("empty list: %+v", out)
+		}
+		learned := netip.MustParseAddrPort("203.0.113.7:5555")
+		out := m.Step(Input{Now: at(time.Second), Handshake: at(time.Second), Endpoint: learned})
+		if out.State != Direct || out.Endpoint != learned || !out.Changed {
+			t.Fatalf("roamed from relay: %+v", out)
+		}
+		// Without candidates the relay never retries.
+		m2 := New(Options{Relay: true})
+		m2.Step(Input{Now: t0})
+		m2.Step(Input{Now: t0, Intent: true})
+		for d := time.Minute; d < 10*time.Minute; d += time.Minute {
+			if out := m2.Step(Input{Now: at(d)}); out.Action != ActNone {
+				t.Fatalf("retry without candidates: %+v", out)
+			}
+		}
+	})
+
+	t.Run("candidate change starts a full round from the relay", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates([]netip.AddrPort{c1})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		if out := m.Step(Input{Now: at(2 * time.Second)}); out.State != Relay {
+			t.Fatalf("relay: %+v", out)
+		}
+		m.SetCandidates([]netip.AddrPort{c2, c1})
+		out := m.Step(Input{Now: at(5 * time.Second)})
+		if out.Action != ActProbe || out.Endpoint != c2 {
+			t.Fatalf("round after change: %+v", out)
+		}
+		out = m.Step(Input{Now: at(7 * time.Second)})
+		if out.Action != ActProbe || out.Endpoint != c1 {
+			t.Fatalf("second candidate of the round: %+v", out)
+		}
+		out = m.Step(Input{Now: at(9 * time.Second)})
+		if out.State != Relay || out.Action != ActRelay {
+			t.Fatalf("round exhausted: %+v", out)
+		}
+	})
+
+	t.Run("direct stall falls back to relay", func(t *testing.T) {
+		m := New(Options{Relay: true})
+		m.SetCandidates([]netip.AddrPort{c1})
+		m.Step(Input{Now: t0})
+		m.Step(Input{Now: t0, Intent: true})
+		m.Step(Input{Now: at(time.Second), Handshake: at(time.Second), Endpoint: c1, Rx: 1, Tx: 1})
+		out := m.Step(Input{Now: at(5 * time.Minute), Handshake: at(time.Second), Endpoint: c1, Rx: 1, Tx: 9})
+		if out.State != Probing {
+			t.Fatalf("stall: %+v", out)
+		}
+		out = m.Step(Input{Now: at(5*time.Minute + 3*time.Second)})
+		if out.State != Relay || out.Action != ActRelay {
+			t.Fatalf("relay after stall: %+v", out)
+		}
+	})
+}

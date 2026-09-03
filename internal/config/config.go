@@ -25,6 +25,14 @@ type Config struct {
 	Log         Log    `yaml:"log"`
 	// MinClientVersion is MAJOR.MINOR; empty means the server's own.
 	MinClientVersion string `yaml:"min_client_version"`
+	Relay            Relay  `yaml:"relay"`
+}
+
+// Relay tunes the packet relay built into the server.
+type Relay struct {
+	// MaxBytesPerSecond limits what one peer may send through the
+	// relay; 0 means unlimited.
+	MaxBytesPerSecond int `yaml:"max_bytes_per_second"`
 }
 
 // Listen holds the listener addresses.

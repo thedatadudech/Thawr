@@ -231,8 +231,7 @@ handshake B initiates first is accepted too, and WireGuard's roaming
 moves the endpoint to wherever authenticated packets come from. A
 candidate is accepted when `last_handshake_time` advances within 2
 seconds. If the list is exhausted (10 seconds at most) the path is
-`unreachable` (the relay takes over in spec 005), re-probed when
-candidates change or, on fresh intent, at most every 60 seconds. A
+`relay` (§4.5), re-probed from there as described below. A
 `direct` path with queued traffic but no handshake for 3 minutes is
 re-probed. Path states are reported to the server (`ReportPath`) and
 shown in the admin UI. No userspace packet multiplexing: the kernel or
@@ -254,12 +253,35 @@ sequenceDiagram
   PB->>WB: UDP to WireGuard listen port
 ```
 
-Each client keeps one TLS connection to `/relay` (HTTP/1.1 Upgrade,
-authenticated with the node secret). For every relayed peer it opens one
-local UDP socket on `127.0.0.1` and points the WireGuard endpoint at it.
-Frames are `type(1) | key(32) | length(2) | payload`. The relay only
-forwards between peers that are mutually visible in the current netmap
-and never sees anything but WireGuard ciphertext. Spec 005.
+Each client keeps one TLS connection to `/relay` (HTTP/1.1 Upgrade
+`thawr-relay/1`, authenticated with the node secret before anything
+past the headers is read), opened when the first peer needs the relay
+and closed after five minutes without relayed peers; it reconnects with
+the same jittered backoff as the sync stream and answers a 30 s ping.
+For every relayed peer it opens one local UDP socket on `127.0.0.1` and
+points the WireGuard endpoint at it: datagrams WireGuard sends there
+become `SEND` frames, `RECV` frames are written from that socket to the
+WireGuard port. Frames are `type(1) | key(32) | length(2) | payload`,
+at most 1500 payload bytes; only payloads starting with a WireGuard
+message type (1–4) are forwarded, on both ends. The relay forwards only
+between peers that are mutually visible (`control.KeyVisibility`,
+cached per netmap generation), answers `PEER_GONE` at most once per
+second per pair, closes a session after ten visibility violations per
+minute, keeps a 256-frame queue per session (drop on overflow) and an
+optional per-peer byte rate (`relay.max_bytes_per_second`); the
+counters appear in `/api/v1/status`. A newer connection for the same
+key replaces the older one, and a deleted peer's session is closed with
+the next registry change. The relay never sees anything but WireGuard
+ciphertext and never logs payload bytes.
+
+The path machine ends an exhausted candidate list in `relay` instead of
+`unreachable`. From the relay it retries one candidate every 60 s (the
+next in turn), returning to the relay when the 2 s window passes, so a
+failed retry costs at most one window of loss; a candidate change (new
+netmap on both sides at once) starts a full simultaneous round, which
+is what upgrades a relayed pair to `direct` after a network change. A
+handshake arriving from a public address while relayed also upgrades
+the path (roaming). Spec 005.
 
 ### 4.6 Policy evaluation
 

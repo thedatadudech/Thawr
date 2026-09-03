@@ -27,3 +27,6 @@ log:
   format: text                   # text | json
 
 min_client_version: ""           # default: the server's own major.minor
+
+relay:
+  max_bytes_per_second: 0        # per-peer relay rate limit; 0 = unlimited
