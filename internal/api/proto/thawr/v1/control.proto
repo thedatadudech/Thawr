@@ -4,12 +4,22 @@ package thawr.v1;
 
 option go_package = "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1";
 
-// Control is the client-to-server control channel.
-// Spec 002 adds Enroll; spec 003 adds Sync, ReportEndpoints, RotateKey
-// and Leave.
+// Control is the client-to-server control channel. Every RPC except
+// Enroll carries the node secret as "authorization: Bearer <secret>".
 service Control {
   // Enroll registers a new agent peer with a one-time token.
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  // Sync streams the caller's netmap: a full map on connect, a full map
+  // on every change affecting the caller, and a keepalive map every 30 s.
+  rpc Sync(SyncRequest) returns (stream NetMap);
+  // ReportEndpoints replaces the caller's endpoint candidates.
+  rpc ReportEndpoints(EndpointReport) returns (Empty);
+  // ReportPath records the caller's path state per peer for status.
+  rpc ReportPath(PathReport) returns (Empty);
+  // RotateKey replaces the caller's WireGuard public key.
+  rpc RotateKey(RotateKeyRequest) returns (RotateKeyResponse);
+  // Leave removes the caller from the network.
+  rpc Leave(Empty) returns (Empty);
 }
 
 // EnrollRequest carries the token and the client's identity.
@@ -39,3 +49,109 @@ message EnrollResponse {
   string server_version = 8;
   int64 netmap_generation = 9;
 }
+
+// SyncRequest opens the netmap stream. generation is informational: the
+// server always sends a full map first.
+message SyncRequest {
+  int64 generation = 1;
+  string client_version = 2;
+}
+
+// NetMap is one peer's complete view of the network.
+message NetMap {
+  int64 generation = 1;
+  SelfInfo self = 2;
+  repeated NetPeer peers = 3;
+  HubPeer hub = 4;
+  repeated FilterRule filter = 5;
+  // keepalive marks a periodic resend with no change.
+  bool keepalive = 6;
+}
+
+// SelfInfo describes the receiving peer.
+message SelfInfo {
+  string id = 1;
+  string name = 2;
+  string ipv4 = 3;
+  string overlay_cidr = 4;
+}
+
+// NetPeer is one visible peer.
+message NetPeer {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  string public_key = 4;
+  string ipv4 = 5;
+  bool online = 6;
+  repeated Endpoint endpoints = 7;
+  bool symmetric = 8;
+  // keepalive asks the receiver to send persistent keepalives to this peer.
+  bool keepalive = 9;
+  // allowed_ips lists extra prefixes routed to this peer besides its /32.
+  repeated string allowed_ips = 10;
+}
+
+// EndpointKind classifies a candidate address.
+enum EndpointKind {
+  ENDPOINT_KIND_UNSPECIFIED = 0;
+  ENDPOINT_KIND_LOCAL = 1;
+  ENDPOINT_KIND_REFLEXIVE = 2;
+  ENDPOINT_KIND_STABLE = 3;
+}
+
+// Endpoint is one ip:port candidate.
+message Endpoint {
+  string addr = 1;
+  EndpointKind kind = 2;
+}
+
+// HubPeer is the server's own WireGuard interface as seen by a peer.
+message HubPeer {
+  string public_key = 1;
+  string endpoint = 2;
+  repeated string allowed_ips = 3;
+}
+
+// FilterRule allows src_ipv4 to reach the receiver on a port range.
+// Empty filter means allow everything from visible peers (until spec 006).
+message FilterRule {
+  string src_ipv4 = 1;
+  string proto = 2;
+  uint32 port_lo = 3;
+  uint32 port_hi = 4;
+}
+
+// EndpointReport replaces the caller's candidates.
+message EndpointReport {
+  repeated Endpoint endpoints = 1;
+  bool symmetric = 2;
+  uint32 listen_port = 3;
+}
+
+// PathReport records how the caller currently reaches each peer.
+message PathReport {
+  repeated PathState paths = 1;
+}
+
+// PathState is one peer's path from the caller's view.
+message PathState {
+  string peer_id = 1;
+  // state is direct, relay, probing, idle, unreachable or hub.
+  string state = 2;
+  string endpoint = 3;
+}
+
+// RotateKeyRequest carries the new public key; the old one stays valid
+// until the next netmap is delivered.
+message RotateKeyRequest {
+  string new_public_key = 1;
+}
+
+// RotateKeyResponse reports the generation carrying the new key.
+message RotateKeyResponse {
+  int64 generation = 1;
+}
+
+// Empty is the empty message.
+message Empty {}
