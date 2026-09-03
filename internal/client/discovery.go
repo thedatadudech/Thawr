@@ -94,6 +94,7 @@ func (d *Daemon) reflexiveRound(ctx context.Context) ([]control.Endpoint, bool) 
 		}
 		return nil, false
 	}
+	d.log.Debug("stun discovery", "mapped", res.Mapped, "symmetric", res.Symmetric, "shared_socket", shared)
 	var out []control.Endpoint
 	seen := map[netip.AddrPort]bool{}
 	for _, m := range res.Mapped {
@@ -104,7 +105,9 @@ func (d *Daemon) reflexiveRound(ctx context.Context) ([]control.Endpoint, bool) 
 			// adds the exact mapping it observes on the hub.
 			ap = netip.AddrPortFrom(m.Addr(), uint16(d.state.ListenPort)) //nolint:gosec // port is 1-65535
 		}
-		if seen[ap] {
+		// The server rejects unroutable candidates; a loopback mapping
+		// only happens when the STUN server is on this host.
+		if a := ap.Addr(); seen[ap] || a.IsLoopback() || a.IsUnspecified() {
 			continue
 		}
 		seen[ap] = true
@@ -130,7 +133,7 @@ func (d *Daemon) reportLoop(ctx context.Context, client thawrv1.ControlClient) {
 	defer poll.Stop()
 	for {
 		now := d.opts.Now()
-		local := d.opts.Endpoints(d.state.ListenPort, d.opts.Interface)
+		local := d.localCandidates()
 		if !sameAddrPorts(local, lastLocal) || lastSTUN.IsZero() || now.Sub(lastSTUN) >= d.opts.EndpointInterval {
 			reflexive, symmetric = d.reflexiveRound(ctx)
 			lastSTUN = now
@@ -163,6 +166,19 @@ func (d *Daemon) reportLoop(ctx context.Context, client thawrv1.ControlClient) {
 		case <-poll.C:
 		}
 	}
+}
+
+// localCandidates lists local addresses outside the overlay (another
+// Thawr interface on this host is never a way to reach a peer).
+func (d *Daemon) localCandidates() []netip.AddrPort {
+	var out []netip.AddrPort
+	for _, ap := range d.opts.Endpoints(d.state.ListenPort, d.opts.Interface) {
+		if d.overlay.Contains(ap.Addr()) {
+			continue
+		}
+		out = append(out, ap)
+	}
+	return out
 }
 
 // setSelf records our own addresses for candidate ordering and status

@@ -40,13 +40,15 @@ type PathResult struct {
 	Endpoint string `json:"endpoint,omitempty"`
 }
 
-// TriggerFunc sends one packet from src to dst inside the overlay so
-// WireGuard initiates a handshake toward the peer's current endpoint.
-type TriggerFunc func(ctx context.Context, src, dst netip.Addr) error
+// TriggerFunc sends one packet from src to dst through the WireGuard
+// interface iface so WireGuard initiates a handshake toward the peer's
+// current endpoint.
+type TriggerFunc func(ctx context.Context, iface string, src, dst netip.Addr) error
 
-// triggerUDP is the default TriggerFunc: one byte to the discard port.
-func triggerUDP(ctx context.Context, src, dst netip.Addr) error {
-	dialer := net.Dialer{LocalAddr: &net.UDPAddr{IP: src.AsSlice()}, Timeout: time.Second}
+// triggerUDP is the default TriggerFunc: one byte to the discard port,
+// bound to the interface where the platform allows it.
+func triggerUDP(ctx context.Context, iface string, src, dst netip.Addr) error {
+	dialer := net.Dialer{LocalAddr: &net.UDPAddr{IP: src.AsSlice()}, Timeout: time.Second, Control: bindToInterface(iface)}
 	c, err := dialer.DialContext(ctx, "udp4", netip.AddrPortFrom(dst, 9).String())
 	if err != nil {
 		return fmt.Errorf("client: trigger %s: %w", dst, err)
@@ -198,7 +200,7 @@ func (d *Daemon) pathTick(ctx context.Context) {
 			d.setPeerEndpoint(ctx, dev, pp, pp.sink.endpoint(), false)
 		case path.ActProbe:
 			d.setPeerEndpoint(ctx, dev, pp, out.Endpoint, true)
-			if err := d.opts.Trigger(ctx, d.selfIP, pp.ipv4); err != nil && ctx.Err() == nil {
+			if err := d.opts.Trigger(ctx, dev.Name(), d.selfIP, pp.ipv4); err != nil && ctx.Err() == nil {
 				d.log.Debug("probe trigger", "peer", pp.name, "err", err)
 			}
 			d.log.Debug("probing", "peer", pp.name, "endpoint", out.Endpoint, "attempt", pp.machine.Probes())

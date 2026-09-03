@@ -143,7 +143,7 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 		STUN:      fixedSTUN("203.0.113.5:4444", false),
 		Path:      path.Options{ProbeWindow: 100 * time.Millisecond, RetryAfter: 500 * time.Millisecond},
 		ProbeTick: 20 * time.Millisecond, IdleTick: 50 * time.Millisecond,
-		Trigger: func(context.Context, netip.Addr, netip.Addr) error { return nil },
+		Trigger: func(context.Context, string, netip.Addr, netip.Addr) error { return nil },
 	}
 	for _, m := range mods {
 		m(&opts)

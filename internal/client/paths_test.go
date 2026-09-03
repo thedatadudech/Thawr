@@ -66,8 +66,8 @@ func TestDaemonProbesOnIntent(t *testing.T) {
 	dirA, stA, stB, keyB := twoPeers(t, cp, cands, false)
 	var triggers atomic.Int32
 	d, fake, stop := startDaemon(t, dirA, func(o *DaemonOptions) {
-		o.Trigger = func(_ context.Context, src, dst netip.Addr) error {
-			if src.String() != stA.IPv4 || dst.String() != stB.IPv4 {
+		o.Trigger = func(_ context.Context, iface string, src, dst netip.Addr) error {
+			if iface != "thawr0" || src.String() != stA.IPv4 || dst.String() != stB.IPv4 {
 				t.Errorf("trigger %s -> %s", src, dst)
 			}
 			triggers.Add(1)
