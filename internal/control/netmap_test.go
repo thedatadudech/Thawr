@@ -128,9 +128,40 @@ func TestEndpointTable(t *testing.T) {
 	if eps, sym := tab.Get("p"); len(eps) != 1 || !sym {
 		t.Errorf("Get: %v %v", eps, sym)
 	}
+	// The hub-observed address joins the list as a reflexive candidate,
+	// deduplicated against reported ones and expiring like them.
+	observed := netip.MustParseAddrPort("203.0.113.5:41821")
+	if !tab.SetObserved("p", observed) {
+		t.Error("first observation not a change")
+	}
+	if tab.SetObserved("p", observed) {
+		t.Error("same observation counted as change")
+	}
+	if tab.SetObserved("p", netip.MustParseAddrPort("127.0.0.1:5")) || tab.SetObserved("p", netip.MustParseAddrPort("0.0.0.0:5")) {
+		t.Error("unroutable observation accepted")
+	}
+	if eps, _ := tab.Get("p"); len(eps) != 2 || eps[1].Addr != observed || eps[1].Kind != EndpointReflexive {
+		t.Errorf("Get with observed: %v", eps)
+	}
+	tab.SetObserved("p", good[0].Addr)
+	if eps, _ := tab.Get("p"); len(eps) != 1 {
+		t.Errorf("observed duplicate not merged: %v", eps)
+	}
+	tab.SetObserved("r", observed)
+	if eps, sym := tab.Get("r"); len(eps) != 1 || sym {
+		t.Errorf("observed-only peer: %v %v", eps, sym)
+	}
 	clk.Advance(endpointTTL + time.Second)
 	if eps, _ := tab.Get("p"); eps != nil {
 		t.Error("expired entry still returned")
+	}
+	if eps, _ := tab.Get("r"); eps != nil {
+		t.Error("expired observation still returned")
+	}
+	tab.SetObserved("p", observed)
+	tab.Delete("p")
+	if eps, _ := tab.Get("p"); eps != nil {
+		t.Error("Delete kept the observation")
 	}
 	bad := [][]Endpoint{
 		{{Addr: netip.MustParseAddrPort("127.0.0.1:1"), Kind: EndpointLocal}},
