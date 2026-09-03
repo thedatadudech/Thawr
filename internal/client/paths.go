@@ -11,6 +11,7 @@ import (
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/path"
+	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -94,6 +95,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 		} else if pp.key != key {
 			// Key rotation: the session is gone, start over.
 			pp.machine = path.New(d.opts.Path)
+			d.relay.Release(relay.Key(pp.key))
 		}
 		pp.name, pp.key, pp.ipv4, pp.peer = p.Name, key, ip, byKey[key]
 		pp.cands, pp.symmetric = p.Candidates(), p.Symmetric
@@ -101,6 +103,7 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 	for id, pp := range d.paths {
 		if !seen[id] {
 			pp.sink.close()
+			d.relay.Release(relay.Key(pp.key))
 			delete(d.paths, id)
 		}
 	}
@@ -125,11 +128,12 @@ func (d *Daemon) wakePaths() {
 
 func (d *Daemon) closeSinks() {
 	d.pmu.Lock()
-	defer d.pmu.Unlock()
 	for id, pp := range d.paths {
 		pp.sink.close()
 		delete(d.paths, id)
 	}
+	d.pmu.Unlock()
+	d.relay.Close()
 }
 
 // pathLoop steps every peer's machine on a timer: fast while a probe is
@@ -189,15 +193,29 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		pp.ping = false
 		if s, ok := stats[pp.key]; ok {
 			in.Handshake, in.Rx, in.Tx = s.LastHandshake, s.RxBytes, s.TxBytes
-			if s.Endpoint.IsValid() && s.Endpoint != pp.sink.endpoint() {
+			// Loopback endpoints are our own sink or relay proxy, never a
+			// real address of the peer.
+			if s.Endpoint.IsValid() && !s.Endpoint.Addr().IsLoopback() {
 				in.Endpoint = s.Endpoint
 			}
 		}
+		prev := pp.state
 		out := pp.machine.Step(in)
 		pp.steps++
 		switch out.Action {
 		case path.ActSink:
 			d.setPeerEndpoint(ctx, dev, pp, pp.sink.endpoint(), false)
+		case path.ActRelay:
+			ep, err := d.relay.Endpoint(ctx, relay.Key(pp.key))
+			if err != nil {
+				d.log.Warn("relay proxy", "peer", pp.name, "err", err)
+				d.setPeerEndpoint(ctx, dev, pp, pp.sink.endpoint(), false)
+				break
+			}
+			d.setPeerEndpoint(ctx, dev, pp, ep, true)
+			if err := d.opts.Trigger(ctx, dev.Name(), d.selfIP, pp.ipv4); err != nil && ctx.Err() == nil {
+				d.log.Debug("relay trigger", "peer", pp.name, "err", err)
+			}
 		case path.ActProbe:
 			d.setPeerEndpoint(ctx, dev, pp, out.Endpoint, true)
 			if err := d.opts.Trigger(ctx, dev.Name(), d.selfIP, pp.ipv4); err != nil && ctx.Err() == nil {
@@ -209,6 +227,9 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		if out.Changed {
 			pp.state, pp.endpoint = out.State, out.Endpoint
 			changed = true
+			if prev == path.Relay && out.State != path.Relay && out.State != path.Probing {
+				d.relay.Release(relay.Key(pp.key))
+			}
 			d.log.Info("path", "peer", pp.name, "state", out.State, "endpoint", out.Endpoint)
 		}
 	}

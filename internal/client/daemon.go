@@ -23,6 +23,7 @@ import (
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/path"
+	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -59,6 +60,9 @@ type DaemonOptions struct {
 	IdleTick  time.Duration
 	// Trigger overrides the probe packet (tests).
 	Trigger TriggerFunc
+	// Relay tunes the relay client's timing; server, credentials and
+	// port always come from the enrollment state.
+	Relay relay.ClientOptions
 }
 
 func (o DaemonOptions) withDefaults() DaemonOptions {
@@ -113,6 +117,7 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 	if o.Trigger == nil {
 		o.Trigger = triggerUDP
 	}
+	o.Path.Relay = true
 	return o
 }
 
@@ -134,6 +139,7 @@ type Daemon struct {
 	selfSymmetric bool
 	selfEndpoints []control.Endpoint
 	pathWake      chan struct{}
+	relay         *relay.Client
 
 	mu        sync.Mutex
 	key       wg.Key
@@ -176,8 +182,18 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("client: address %q in state: %w", st.IPv4, err)
 	}
-	return &Daemon{opts: opts, log: opts.Logger.With("peer", st.Name), state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key,
-		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1)}, nil
+	tlsCfg, err := PinnedTLSConfig(st.Fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	log := opts.Logger.With("peer", st.Name)
+	ro := opts.Relay
+	ro.ServerURL, ro.TLS, ro.NodeSecret, ro.WireGuardPort, ro.Logger = st.Server, tlsCfg, st.NodeSecret, st.ListenPort, log
+	if ro.Now == nil {
+		ro.Now = opts.Now
+	}
+	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key,
+		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro)}, nil
 }
 
 // randomPort picks a listen port in the dynamic range.

@@ -33,9 +33,17 @@ type Status struct {
 	// Symmetric is the NAT verdict.
 	Endpoints   []string     `json:"endpoints"`
 	Symmetric   bool         `json:"symmetric"`
+	Relay       RelayStatus  `json:"relay"`
 	Hub         *PeerStatus  `json:"hub,omitempty"`
 	Peers       []PeerStatus `json:"peers"`
 	RetrievedAt time.Time    `json:"retrieved_at"`
+}
+
+// RelayStatus describes the relay connection.
+type RelayStatus struct {
+	Connected bool `json:"connected"`
+	// Peers counts peers currently reached through the relay.
+	Peers int `json:"peers"`
 }
 
 // PeerStatus joins netmap knowledge with device counters.
@@ -75,6 +83,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	}
 	st.Symmetric = d.selfSymmetric
 	d.pmu.Unlock()
+	st.Relay = RelayStatus{Connected: d.relay.Connected(), Peers: d.relay.Peers()}
 	stats := map[string]wg.PeerStats{}
 	if dev != nil {
 		st.Backend = dev.Backend()

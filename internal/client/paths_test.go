@@ -160,26 +160,39 @@ func TestDaemonSinkIntentStartsProbe(t *testing.T) {
 		eps := endpointsOf(fake, keyB)
 		return len(eps) == 2 && eps[1] == candLAN2
 	})
-	// No answer: back to the sink as unreachable, at most one probe per window.
-	waitFor(t, "unreachable", func() bool {
-		st, _ := NewLocalClient(d.opts.Socket).Status(context.Background())
-		return len(st.Peers) == 1 && st.Peers[0].Path == "unreachable"
+	// No answer: the relay takes over (a loopback proxy, not the sink),
+	// and one candidate is retried per RetryAfter, returning to the relay.
+	lc := NewLocalClient(d.opts.Socket)
+	waitFor(t, "relay", func() bool {
+		st, _ := lc.Status(context.Background())
+		return len(st.Peers) == 1 && st.Peers[0].Path == "relay" && st.Relay.Connected && st.Relay.Peers == 1
 	})
-	if eps := endpointsOf(fake, keyB); len(eps) != 3 || !eps[2].Addr().IsLoopback() {
-		t.Errorf("after exhaustion: %v", eps)
+	eps := endpointsOf(fake, keyB)
+	if len(eps) != 3 || !eps[2].Addr().IsLoopback() || eps[2] == sinkEP {
+		t.Fatalf("after exhaustion: %v (sink %s)", eps, sinkEP)
+	}
+	waitFor(t, "retry from relay", func() bool {
+		eps := endpointsOf(fake, keyB)
+		return len(eps) >= 5 && eps[3] == candLAN2 && eps[4].Addr().IsLoopback()
+	})
+	if st, _ := lc.Status(context.Background()); st.Peers[0].Path != "relay" || st.Peers[0].PathEndpoint != "" {
+		t.Errorf("after retry: %+v", st.Peers[0])
 	}
 }
 
-func TestDaemonSymmetricPeersUnreachable(t *testing.T) {
+func TestDaemonSymmetricPeersUseRelay(t *testing.T) {
 	cp := newControlPlane(t)
-	dirA, _, _, keyB := twoPeers(t, cp, []control.Endpoint{{Addr: candRefl, Kind: control.EndpointReflexive}}, true)
+	dirA, stA, stB, keyB := twoPeers(t, cp, []control.Endpoint{{Addr: candRefl, Kind: control.EndpointReflexive}}, true)
 	d, fake, stop := startDaemon(t, dirA, func(o *DaemonOptions) { o.STUN = fixedSTUN("203.0.113.5:4444", true) })
 	defer stop()
 	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 && nm.Peers[0].Symmetric })
 	lc := NewLocalClient(d.opts.Socket)
 	waitFor(t, "own symmetric verdict", func() bool { st, _ := lc.Status(context.Background()); return st.Symmetric })
+	if st, _ := lc.Status(context.Background()); st.Relay.Connected {
+		t.Fatal("relay connected before any peer needed it")
+	}
 	res, err := lc.Ping(context.Background(), "b")
-	if err != nil || res.State != "unreachable" || res.Endpoint != "" {
+	if err != nil || res.State != "relay" || res.Endpoint != "" {
 		t.Fatalf("ping: %+v err=%v", res, err)
 	}
 	for _, ep := range endpointsOf(fake, keyB) {
@@ -187,6 +200,29 @@ func TestDaemonSymmetricPeersUnreachable(t *testing.T) {
 			t.Fatalf("reflexive candidate probed between two symmetric NATs: %s", ep)
 		}
 	}
+	waitFor(t, "relay session on the server", func() bool {
+		st, _ := lc.Status(context.Background())
+		return st.Relay.Connected && st.Relay.Peers == 1 && cp.relay.Stats().Sessions == 1
+	})
+	waitFor(t, "relay reported", func() bool {
+		for _, p := range cp.paths.Get(stA.PeerID) {
+			if p.PeerID == stB.PeerID && p.State == "relay" {
+				return true
+			}
+		}
+		return false
+	})
+	// The peer reaches us directly from a public address: upgrade and
+	// release the proxy.
+	fake.SetStats(wg.PeerStats{PublicKey: keyB, Endpoint: candRefl, LastHandshake: time.Now()})
+	waitFor(t, "direct via roaming", func() bool {
+		st, _ := lc.Status(context.Background())
+		return st.Peers[0].Path == "direct" && st.Peers[0].PathEndpoint == candRefl.String()
+	})
+	waitFor(t, "proxy released and connection idle", func() bool {
+		st, _ := lc.Status(context.Background())
+		return st.Relay.Peers == 0 && !st.Relay.Connected
+	})
 }
 
 func TestEndpointReportDedup(t *testing.T) {
