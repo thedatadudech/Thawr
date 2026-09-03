@@ -107,12 +107,16 @@ func (h *Hub) Subscribe(peerID string) (<-chan struct{}, func()) {
 	}
 }
 
-// Changed records a change and wakes every subscriber after the
-// coalescing delay. Persistent changes have already bumped the database
-// generation; the sequence catches up to it.
+// Changed bumps the sequence at once (catching up with the database
+// generation after a persistent change) and wakes every subscriber
+// after the coalescing delay, so a burst becomes one netmap.
 func (h *Hub) Changed() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.sequence++
+	if gen, err := h.store.Meta().Generation(context.Background()); err == nil && gen > h.sequence {
+		h.sequence = gen
+	}
 	if h.pending {
 		return
 	}
@@ -123,10 +127,6 @@ func (h *Hub) Changed() {
 func (h *Hub) flush() {
 	h.mu.Lock()
 	h.pending = false
-	h.sequence++
-	if gen, err := h.store.Meta().Generation(context.Background()); err == nil && gen > h.sequence {
-		h.sequence = gen
-	}
 	seq := h.sequence
 	for s := range h.subs {
 		select {

@@ -46,20 +46,20 @@ func TestHubCoalesceAndSequence(t *testing.T) {
 		t.Error("burst produced a second wake-up")
 	default:
 	}
-	if h.Generation() != 1 {
-		t.Errorf("burst bumped sequence to %d, want 1", h.Generation())
+	if h.Generation() != 5 {
+		t.Errorf("burst bumped sequence to %d, want 5 (one per change)", h.Generation())
 	}
-	// A persistent change moves the DB generation ahead; the sequence
-	// catches up instead of falling behind.
-	for i := 0; i < 5; i++ {
+	// A persistent change moves the DB generation ahead of the
+	// sequence; the sequence catches up instead of falling behind.
+	for i := 0; i < 20; i++ {
 		if _, err := st.Meta().IncrementGeneration(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	h.Changed()
 	waitWake(t, ch)
-	if h.Generation() != 5 {
-		t.Errorf("sequence %d, want 5 after catching up", h.Generation())
+	if h.Generation() != 20 {
+		t.Errorf("sequence %d, want 20 after catching up", h.Generation())
 	}
 	unsub()
 	h.Changed()
