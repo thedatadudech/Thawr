@@ -157,7 +157,36 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 	}
 	addClientCommonFlags(rotate, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate)
+	ping := &cobra.Command{
+		Use:   "ping <peer>",
+		Short: "Establish a path to a peer and report it (JSON; spec 007 adds the table view)",
+		Long: `Marks traffic intent toward the named peer so the client probes its
+candidates now, waits until the path is settled and prints the result.
+Exit code 1 when no direct path was found.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			res, err := client.NewLocalClient(socket).Ping(cmd.Context(), args[0])
+			if err != nil {
+				var le *client.LocalError
+				if errors.As(err, &le) {
+					return &exitError{code: exitConfigError, err: err}
+				}
+				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(res); err != nil {
+				return err
+			}
+			if res.State != "direct" {
+				return &exitError{code: exitNotConnected, err: fmt.Errorf("no direct path to %s (%s)", args[0], res.State)}
+			}
+			return nil
+		},
+	}
+	addClientCommonFlags(ping, &stateDir, &socket)
+
+	cmd.AddCommand(up, down, status, rotate, ping)
 	return cmd
 }
 
