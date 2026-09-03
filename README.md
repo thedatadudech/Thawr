@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="Thawr" src="docs/assets/logo-light.svg" width="320">
+  </picture>
+</p>
+
 # Thawr
 
 **One binary. No cloud. Works offline.**
