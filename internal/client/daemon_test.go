@@ -43,8 +43,17 @@ type controlPlane struct {
 	hubKey    wg.Key
 }
 
-func newControlPlane(t *testing.T) *controlPlane {
+// cpOptions tune the test control plane.
+type cpOptions struct {
+	visibility control.Visibility
+}
+
+func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	t.Helper()
+	cpo := cpOptions{visibility: control.OwnerVisibility{}}
+	for _, m := range mods {
+		m(&cpo)
+	}
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -72,7 +81,7 @@ func newControlPlane(t *testing.T) *controlPlane {
 	paths := control.NewPathTable(time.Now)
 	hubCfg := control.HubConfig{PublicKey: hubKey.PublicKey().String(), Endpoint: "127.0.0.1:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay,
 		STUNAddrs: []string{"127.0.0.1:3478", "127.0.0.1:3479"}}
-	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubCfg, hub.Generation)
+	builder := control.NewNetMapBuilder(st, cpo.visibility, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
 		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths,
@@ -80,7 +89,7 @@ func newControlPlane(t *testing.T) *controlPlane {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relaySrv := relay.NewServer(keyVisibility{control.NewKeyVisibility(st, control.OwnerVisibility{}, hub.Generation)}, relay.ServerOptions{Logger: quiet})
+	relaySrv := relay.NewServer(keyVisibility{control.NewKeyVisibility(st, cpo.visibility, hub.Generation)}, relay.ServerOptions{Logger: quiet})
 	t.Cleanup(relaySrv.Close)
 	rest, err := api.NewREST(api.RESTDeps{Status: statusStub{}, UI: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}, Logger: quiet, NodeAuth: registry, Relay: relaySrv})
 	if err != nil {

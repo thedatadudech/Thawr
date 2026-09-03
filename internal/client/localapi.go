@@ -31,12 +31,15 @@ type Status struct {
 	ListenPort int        `json:"listen_port"`
 	// Endpoints are this device's own candidates as last reported;
 	// Symmetric is the NAT verdict.
-	Endpoints   []string     `json:"endpoints"`
-	Symmetric   bool         `json:"symmetric"`
-	Relay       RelayStatus  `json:"relay"`
-	Hub         *PeerStatus  `json:"hub,omitempty"`
-	Peers       []PeerStatus `json:"peers"`
-	RetrievedAt time.Time    `json:"retrieved_at"`
+	Endpoints []string    `json:"endpoints"`
+	Symmetric bool        `json:"symmetric"`
+	Relay     RelayStatus `json:"relay"`
+	// Filter reports the receiver-side policy filter when the device
+	// supports one.
+	Filter      *wg.FilterStats `json:"filter,omitempty"`
+	Hub         *PeerStatus     `json:"hub,omitempty"`
+	Peers       []PeerStatus    `json:"peers"`
+	RetrievedAt time.Time       `json:"retrieved_at"`
 }
 
 // RelayStatus describes the relay connection.
@@ -88,6 +91,10 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	if dev != nil {
 		st.Backend = dev.Backend()
 		st.Interface = dev.Name()
+		if fd, ok := dev.(wg.Filterable); ok {
+			fs := fd.FilterStats()
+			st.Filter = &fs
+		}
 		if list, err := dev.Stats(ctx); err == nil {
 			for _, s := range list {
 				stats[s.PublicKey.String()] = s
