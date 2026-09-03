@@ -64,6 +64,8 @@ type NetMap struct {
 	Peers      []NetPeer
 	Hub        HubPeer
 	Filter     []FilterRule
+	// STUN lists the server's STUN listeners as host:port.
+	STUN []string
 }
 
 // Visibility decides whether two peers may see each other's keys.
@@ -86,6 +88,8 @@ type HubConfig struct {
 	Endpoint  string
 	Address   netip.Addr
 	Overlay   netip.Prefix
+	// STUNAddrs are the public host:port of the STUN listeners.
+	STUNAddrs []string
 }
 
 // Presence reports whether a peer is online.
@@ -141,6 +145,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		},
 		Peers:  []NetPeer{},
 		Filter: []FilterRule{},
+		STUN:   append([]string{}, b.hub.STUNAddrs...),
 	}
 	for _, p := range all {
 		if p.ID == self.ID {

@@ -61,7 +61,7 @@ func newSyncEnv(t *testing.T) *syncEnv {
 	registry := control.NewRegistry(st, quiet).WithNotifier(hub)
 	enroller := control.NewEnroller(st, now, quiet, overlay, "").WithNotifier(hub)
 	endpoints := control.NewEndpointTable(now)
-	hubInfo := control.HubConfig{PublicKey: "HUB", Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay}
+	hubInfo := control.HubConfig{PublicKey: "HUB", Endpoint: "vpn:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: overlay, STUNAddrs: []string{"vpn:3478", "vpn:3479"}}
 	builder := control.NewNetMapBuilder(st, control.OwnerVisibility{}, endpoints, hub, hubInfo, hub.Generation)
 	srv, err := NewGRPC(GRPCDeps{
 		Enroller: enroller, Hub: HubInfo{PublicKey: "HUB", Endpoint: "vpn:51820", Overlay: overlay}, Logger: quiet,
@@ -144,7 +144,8 @@ func TestSyncStreamsOnChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first map: %v", err)
 	}
-	if first.GetSelf().GetId() != aID || first.GetSelf().GetIpv4() != "100.64.0.2" || len(first.GetPeers()) != 0 || first.GetHub().GetPublicKey() != "HUB" || first.GetKeepalive() {
+	if first.GetSelf().GetId() != aID || first.GetSelf().GetIpv4() != "100.64.0.2" || len(first.GetPeers()) != 0 || first.GetHub().GetPublicKey() != "HUB" || first.GetKeepalive() ||
+		len(first.GetSelf().GetStunAddrs()) != 2 || first.GetSelf().GetStunAddrs()[0] != "vpn:3478" {
 		t.Errorf("first map: %+v", first)
 	}
 	if !env.hub.Online(aID) {

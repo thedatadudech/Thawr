@@ -74,6 +74,8 @@ message SelfInfo {
   string name = 2;
   string ipv4 = 3;
   string overlay_cidr = 4;
+  // stun_addrs are the server's STUN listeners as host:port (one or two).
+  repeated string stun_addrs = 5;
 }
 
 // NetPeer is one visible peer.

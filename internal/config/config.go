@@ -114,6 +114,20 @@ func (c *Config) HubAddr() netip.Prefix {
 	return netip.PrefixFrom(p.Addr().Next(), p.Bits())
 }
 
+// STUNEndpoints are the public host joined with each STUN listen port,
+// as advertised to peers.
+func (c *Config) STUNEndpoints() []string {
+	out := make([]string, 0, len(c.Listen.STUN))
+	for _, addr := range c.Listen.STUN {
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+		out = append(out, net.JoinHostPort(c.PublicHost(), port))
+	}
+	return out
+}
+
 // HubEndpoint is the public host joined with the WireGuard listen port,
 // as advertised to peers.
 func (c *Config) HubEndpoint() string {

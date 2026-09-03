@@ -27,6 +27,7 @@ type restEnv struct {
 	tokens   *control.Tokens
 	registry *control.Registry
 	sessions *Sessions
+	paths    *control.PathTable
 	handler  http.Handler // HTTPS-style handler with sessions
 	local    http.Handler // admin-socket-style handler
 }
@@ -49,10 +50,11 @@ func newRESTEnv(t *testing.T) *restEnv {
 		tokens:   control.NewTokens(st, now, quiet),
 		registry: control.NewRegistry(st, quiet),
 		sessions: NewSessions(now),
+		paths:    control.NewPathTable(now),
 	}
 	ui := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("Thawr")}}
 	deps := RESTDeps{Status: fakeStatus{}, UI: ui, Logger: quiet, Users: users, Auth: users, Tokens: env.tokens,
-		Peers: env.registry, Sessions: env.sessions, Join: JoinInfo{ServerURL: "https://vpn.example.com", Fingerprint: "sha256:ab"}}
+		Peers: env.registry, Paths: env.paths, Sessions: env.sessions, Join: JoinInfo{ServerURL: "https://vpn.example.com", Fingerprint: "sha256:ab"}}
 	env.handler, err = NewREST(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +108,16 @@ func (e *restEnv) do(h http.Handler, s session, method, path string, body any, w
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+// mustPeerID looks a peer up by name as the local admin.
+func mustPeerID(t *testing.T, env *restEnv, name string) string {
+	t.Helper()
+	p, err := env.registry.Get(context.Background(), control.LocalAdmin, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p.ID
 }
 
 func decode(t *testing.T, rec *httptest.ResponseRecorder, v any) {
@@ -260,6 +272,17 @@ func TestPeersCRUD(t *testing.T) {
 	}
 	if rec := env.do(env.local, session{}, http.MethodGet, "/api/v1/peers/alice-laptop", nil, false); rec.Code != http.StatusOK {
 		t.Errorf("get: %d", rec.Code)
+	}
+	// Paths reported by a peer appear in its detail, targets by name;
+	// targets the caller may not see are left out.
+	env.paths.Set(peers[0].ID, []control.PathState{{PeerID: "unknown", State: "direct"}, {PeerID: mustPeerID(t, env, "markus-box"), State: "direct", Endpoint: "203.0.113.9:4000"}})
+	var detail struct {
+		Name  string     `json:"name"`
+		Paths []pathView `json:"paths"`
+	}
+	decode(t, env.do(env.local, session{}, http.MethodGet, "/api/v1/peers/alice-laptop", nil, false), &detail)
+	if detail.Name != "alice-laptop" || len(detail.Paths) != 1 || detail.Paths[0].Peer != "markus-box" || detail.Paths[0].Endpoint != "203.0.113.9:4000" || detail.Paths[0].UpdatedAt == "" {
+		t.Errorf("detail: %+v", detail)
 	}
 	if rec := env.do(env.local, session{}, http.MethodDelete, "/api/v1/peers/alice-laptop", nil, false); rec.Code != http.StatusNoContent {
 		t.Errorf("delete: %d", rec.Code)

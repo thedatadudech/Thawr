@@ -43,12 +43,16 @@ func TestNetMapBuilder(t *testing.T) {
 	if _, err := eps.Set(a2.Peer.ID, []Endpoint{{Addr: netip.MustParseAddrPort("192.168.1.5:41820"), Kind: EndpointLocal}}, true, 41820); err != nil {
 		t.Fatal(err)
 	}
-	hub := HubConfig{PublicKey: "HUBKEY", Endpoint: "vpn.example.com:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: netip.MustParsePrefix("100.64.0.0/10")}
+	hub := HubConfig{PublicKey: "HUBKEY", Endpoint: "vpn.example.com:51820", Address: netip.MustParseAddr("100.64.0.1"), Overlay: netip.MustParsePrefix("100.64.0.0/10"),
+		STUNAddrs: []string{"vpn.example.com:3478", "vpn.example.com:3479"}}
 	b := NewNetMapBuilder(env.st, OwnerVisibility{}, eps, fakePresence{a2.Peer.ID: true}, hub, func() int64 { return 42 })
 
 	nm, err := b.Build(ctx, a1.Peer.ID)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
+	}
+	if len(nm.STUN) != 2 || nm.STUN[1] != "vpn.example.com:3479" {
+		t.Errorf("STUN addrs: %v", nm.STUN)
 	}
 	if nm.Generation != 42 || nm.SelfID != a1.Peer.ID || nm.SelfName != "a1" || nm.SelfIPv4.String() != a1.Peer.IPv4 || nm.Overlay != hub.Overlay {
 		t.Errorf("self: %+v", nm)
