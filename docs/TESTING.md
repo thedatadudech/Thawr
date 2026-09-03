@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`) | Linux, root, iproute2, nftables |
 
 The integration tests use the real binary and the WireGuard adapter that
 `wg.Open` selects on the host: the kernel module when it loads, else
@@ -86,3 +86,23 @@ Two devices behind different home routers, server on a public host.
    relay connection closes five minutes later.
 5. `curl -k https://server/relay` without a token answers 401; the
    server log never contains payload bytes.
+
+## Manual checklist for the policy (spec 006)
+
+1. Start with no policy file: `thawr client status` on every device
+   lists no peers; `thawr admin policy show` reports the empty
+   default-deny policy.
+2. Write a rule opening one port from one user to another, run `thawr
+   admin policy reload`: both devices list each other within 5 s, the
+   destination's `status` shows `filter.rules: 1`.
+3. `nc` to the allowed port connects; to another port it times out and
+   `filter.drops` grows on the destination; a reply to a connection
+   the destination opened itself passes.
+4. With kernel WireGuard `nft list table inet thawr` shows the chain
+   with policy drop and one rule per policy entry; with `wireguard-go`
+   the same behaviour comes from the userspace filter.
+5. `thawr admin policy check bad.yaml` names the rule index and field;
+   a reload of a broken file answers with the errors and `show` still
+   prints the previous hash.
+6. A member cannot create a token carrying a tag that `tagOwners` does
+   not grant them (403 in the UI); an admin always can.

@@ -180,9 +180,47 @@ entry.
         status endpoint carries the relay counters, two on-host clients
         still reach `direct`, no secrets or payload bytes in logs. The
         netns relay tests skip here (no `ip`, `nft`, `conntrack`, `iperf3`).
-- [ ] **006 ACL policy** — `docs/specs/006-acl-policy.md`
+- [x] **006 ACL policy** — `docs/specs/006-acl-policy.md`
       Policy parse/validate/compile, visibility, nftables filter,
       userspace filter, hub-side filter, `admin policy` commands.
+      - Compilation is bitset based: one (rule, dst entry) pair holds a
+        source and a destination bitset over the peer list; `self` is
+        evaluated per pair by owner. 500 peers and 50 rules compile in
+        about 25 ms (`BenchmarkCompile`).
+      - Group selectors resolve to every peer owned by a member, so a
+        server enrolled by an admin reaches whatever the admin may.
+      - Unknown users and groups are validation errors; unknown tags and
+        peers warnings. `thawr server --check` validates syntax only (no
+        data dir); reload and check on the running server validate
+        against the registry.
+      - The compiled policy is cached per (policy hash, persisted
+        generation), not the hub's in-memory sequence, which also moves
+        on endpoint reports.
+      - nftables: base chains cannot bind to one device on the input
+        hook, so the chain has policy drop and a first rule `iifname !=
+        <overlay iface> accept`; the hub uses the forward hook with
+        `oifname`. `SetFilter` rebuilds the table in one batch.
+      - Userspace filter: `tun.Device` wrapper; only inbound (device to
+        TUN) is filtered, outbound records flows. An `any` rule lets ICMP
+        through only when it opens every port.
+      - `Filterable` is an optional device interface; the fake records
+        the sets. A policy reload bumps the persisted generation so every
+        Sync stream resends the map.
+      - `github.com/google/nftables` v0.3.0 added (Apache-2.0, pure Go,
+        Linux-only files); it pulled `mdlayher/netlink` to a newer
+        pre-release.
+      - Tests from earlier specs that assumed same-owner visibility now
+        write an explicit `self` policy.
+      - Verified on this box with the real binary (userspace WireGuard):
+        no policy file gives an empty default-deny policy and no visible
+        peers; `admin policy reload` made alice-box and bob-box visible
+        within a second with one filter rule on bob; `client ping`
+        reached direct while bob's filter dropped the trigger packet
+        (drops=1); `admin policy check` rejected a broken file naming
+        `acls[0].dst[0]` with exit 2; an invalid reload kept the previous
+        hash; a member creating a `tag:prod` token got 403. nftables
+        cannot run here (no CAP_NET_ADMIN); the netns policy test and the
+        nftables ruleset test skip and need a Linux VM.
 - [ ] **007 CLI status** — `docs/specs/007-cli-status.md`
       Local daemon API, `client status` text/JSON/watch, `client ping`,
       `admin peer list/show`, exit codes.
