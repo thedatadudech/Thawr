@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"github.com/thedatadudech/thawr/internal/stun"
 )
 
 // Key is a 32-byte WireGuard key (private, public or preshared).
@@ -72,8 +74,14 @@ type PeerStats struct {
 
 // Device is a WireGuard interface, kernel or userspace.
 type Device interface {
-	// Configure applies the full desired state.
+	// Configure applies the full desired state: listed peers are created
+	// or updated in place (sessions of unchanged peers survive), peers
+	// not listed are removed. A zero Endpoint leaves the current one.
 	Configure(ctx context.Context, cfg Config) error
+	// SetPeer creates or updates one peer without touching the others.
+	SetPeer(ctx context.Context, p Peer) error
+	// RemovePeer deletes one peer; a missing peer is not an error.
+	RemovePeer(ctx context.Context, key Key) error
 	// Stats reports per-peer counters and handshake times.
 	Stats(ctx context.Context) ([]PeerStats, error)
 	// Backend is "kernel", "userspace" or "fake".
@@ -81,6 +89,14 @@ type Device interface {
 	// Name is the interface name actually created (macOS assigns utunN).
 	Name() string
 	Close() error
+}
+
+// STUNCapable is implemented by devices that can send STUN requests
+// from their own WireGuard socket (the userspace adapter). The kernel
+// adapter cannot share its socket, so callers fall back to a separate
+// one when the assertion fails.
+type STUNCapable interface {
+	STUNTransport() stun.Transport
 }
 
 // Options controls Open.

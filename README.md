@@ -55,12 +55,15 @@ Client, on any machine:
 ```
 sudo thawr client up --server https://vpn.example.com --token thawr_... --fingerprint sha256:...
 thawr client status
+thawr client ping <peer>
 ```
 
 `client up` enrols the device on first run and then keeps the WireGuard
-interface in sync with the server until stopped. Peers that can reach
-each other directly (same LAN, public addresses) talk right away; NAT
-traversal and the relay follow in the next specs.
+interface in sync with the server until stopped. Peers find each other
+through STUN and WireGuard hole punching: same-LAN addresses first, then
+the public address behind the router; `client ping` shows the path in
+use. Two devices behind symmetric NATs need the relay, which follows in
+the next spec.
 
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 (STUN), UDP 51820 (WireGuard hub for phones).

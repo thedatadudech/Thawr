@@ -20,18 +20,27 @@ type endpointEntry struct {
 	updated    time.Time
 }
 
-// EndpointTable holds each peer's reported candidates in memory. Entries
-// expire after five minutes without a report; a restart starts empty.
+type observedEntry struct {
+	addr    netip.AddrPort
+	updated time.Time
+}
+
+// EndpointTable holds each peer's reported candidates in memory, plus
+// the address the hub interface last saw its WireGuard packets come
+// from (the exact NAT mapping of the client's socket, which a kernel
+// WireGuard client cannot learn through STUN itself). Entries expire
+// after five minutes without a report; a restart starts empty.
 type EndpointTable struct {
 	now func() time.Time
 
-	mu sync.Mutex
-	m  map[string]endpointEntry
+	mu       sync.Mutex
+	m        map[string]endpointEntry
+	observed map[string]observedEntry
 }
 
 // NewEndpointTable builds an empty table.
 func NewEndpointTable(now func() time.Time) *EndpointTable {
-	return &EndpointTable{now: now, m: map[string]endpointEntry{}}
+	return &EndpointTable{now: now, m: map[string]endpointEntry{}, observed: map[string]observedEntry{}}
 }
 
 // ValidateEndpoints checks a report: at most MaxEndpoints, each a valid
@@ -68,16 +77,45 @@ func (t *EndpointTable) Set(peerID string, eps []Endpoint, symmetric bool, liste
 	return changed, nil
 }
 
-// Get returns a copy of a peer's live candidates.
+// SetObserved records where the hub last saw peerID's WireGuard packets
+// come from and reports whether that changed. Loopback and unspecified
+// addresses are ignored.
+func (t *EndpointTable) SetObserved(peerID string, addr netip.AddrPort) (changed bool) {
+	a := addr.Addr().Unmap()
+	if !addr.IsValid() || addr.Port() == 0 || a.IsLoopback() || a.IsUnspecified() {
+		return false
+	}
+	addr = netip.AddrPortFrom(a, addr.Port())
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	old, ok := t.observed[peerID]
+	t.observed[peerID] = observedEntry{addr: addr, updated: t.now()}
+	return !ok || old.addr != addr
+}
+
+// Get returns a copy of a peer's live candidates: the reported ones in
+// report order, then the hub-observed address as a reflexive candidate
+// unless it is already listed.
 func (t *EndpointTable) Get(peerID string) (eps []Endpoint, symmetric bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	e, ok := t.m[peerID]
-	if !ok || t.now().Sub(e.updated) > endpointTTL {
-		delete(t.m, peerID)
-		return nil, false
+	now := t.now()
+	if e, ok := t.m[peerID]; ok {
+		if now.Sub(e.updated) > endpointTTL {
+			delete(t.m, peerID)
+		} else {
+			eps = append([]Endpoint(nil), e.endpoints...)
+			symmetric = e.symmetric
+		}
 	}
-	return append([]Endpoint(nil), e.endpoints...), e.symmetric
+	if o, ok := t.observed[peerID]; ok {
+		if now.Sub(o.updated) > endpointTTL {
+			delete(t.observed, peerID)
+		} else if !containsAddr(eps, o.addr) {
+			eps = append(eps, Endpoint{Addr: o.addr, Kind: EndpointReflexive})
+		}
+	}
+	return eps, symmetric
 }
 
 // Delete forgets a peer.
@@ -85,6 +123,16 @@ func (t *EndpointTable) Delete(peerID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.m, peerID)
+	delete(t.observed, peerID)
+}
+
+func containsAddr(eps []Endpoint, addr netip.AddrPort) bool {
+	for _, e := range eps {
+		if e.Addr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 func sameEndpoints(a, b []Endpoint) bool {

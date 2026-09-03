@@ -30,7 +30,7 @@ make test          # go test -race -count=1 ./...
 make lint          # gofmt -l . ; go vet ./... ; golangci-lint run
 make run-server    # go run ./cmd/thawr server --config config/server.example.yaml
 make run-client    # go run ./cmd/thawr client up --server https://127.0.0.1:8443 --token $THAWR_TOKEN
-                   # (enrols when needed, then runs the sync daemon; client status|down|rotate-key talk to its socket)
+                   # (enrols when needed, then runs the sync daemon; client status|ping|down|rotate-key talk to its socket)
 make integration   # go test -race -tags integration ./tests/... (Linux, needs CAP_NET_ADMIN)
 make proto         # regenerate gRPC/protobuf code (buf + plugins via go run, nothing to install)
 ```
@@ -43,7 +43,8 @@ Toolchain: Go 1.26 or newer; `go.mod` pins the minimum. No CGO anywhere
 
 ```
 cmd/thawr/          entry point, subcommands server | client | admin
-internal/control/   peer registry, keys, enrollment, policy engine, netmap
+internal/control/   peer registry, keys, enrollment, policy engine, netmap; path/ = candidate order + path state machine
+internal/stun/      STUN codec (copied from Tailscale), client discovery, rate-limited server
 internal/relay/     relay server and client-side relay proxy
 internal/wg/        WireGuard adapter: kernel (wgctrl) and wireguard-go
 internal/store/     SQLite persistence and embedded SQL migrations

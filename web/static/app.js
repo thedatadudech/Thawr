@@ -30,6 +30,27 @@
     return td;
   }
 
+  // pathsRow renders the paths a peer reported (spec 004) under its row.
+  function pathsRow(paths) {
+    const tr = document.createElement("tr");
+    tr.className = "detail";
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    if (!paths || paths.length === 0) {
+      td.textContent = "No paths reported yet.";
+    } else {
+      const ul = document.createElement("ul");
+      for (const path of paths) {
+        const li = document.createElement("li");
+        li.textContent = `${path.peer}: ${path.state}${path.endpoint ? " via " + path.endpoint : ""} (${path.updated_at})`;
+        ul.append(li);
+      }
+      td.append(ul);
+    }
+    tr.append(td);
+    return tr;
+  }
+
   async function loadPeers() {
     const peers = await api("GET", "/api/v1/peers");
     const tbody = $("#peers tbody");
@@ -37,6 +58,14 @@
     for (const p of peers) {
       const tr = document.createElement("tr");
       tr.append(cell(p.name), cell(p.ipv4), cell(p.kind), cell(p.owner || "-"), cell(p.tags.join(", ") || "-"), cell(p.created_at));
+      tr.append(actionCell("Show", async () => {
+        const next = tr.nextElementSibling;
+        if (next && next.classList.contains("detail")) { next.remove(); return; }
+        try {
+          const detail = await api("GET", `/api/v1/peers/${encodeURIComponent(p.name)}`);
+          tr.after(pathsRow(detail.paths));
+        } catch (e) { alert(e.message); }
+      }));
       if (me.role === "admin") {
         const td = document.createElement("td");
         const rename = document.createElement("button");

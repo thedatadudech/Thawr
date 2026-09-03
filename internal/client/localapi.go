@@ -3,8 +3,11 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -14,18 +17,22 @@ import (
 // Status is the daemon's state as served on the local socket. Spec 007
 // renders it; this spec defines the fields.
 type Status struct {
-	Version     string       `json:"version"`
-	Name        string       `json:"name"`
-	PeerID      string       `json:"peer_id"`
-	IPv4        string       `json:"ipv4"`
-	Server      string       `json:"server"`
-	Connected   bool         `json:"connected"`
-	LastError   string       `json:"last_error,omitempty"`
-	Generation  int64        `json:"generation"`
-	NetMapAt    *time.Time   `json:"netmap_at,omitempty"`
-	Backend     string       `json:"backend"`
-	Interface   string       `json:"interface"`
-	ListenPort  int          `json:"listen_port"`
+	Version    string     `json:"version"`
+	Name       string     `json:"name"`
+	PeerID     string     `json:"peer_id"`
+	IPv4       string     `json:"ipv4"`
+	Server     string     `json:"server"`
+	Connected  bool       `json:"connected"`
+	LastError  string     `json:"last_error,omitempty"`
+	Generation int64      `json:"generation"`
+	NetMapAt   *time.Time `json:"netmap_at,omitempty"`
+	Backend    string     `json:"backend"`
+	Interface  string     `json:"interface"`
+	ListenPort int        `json:"listen_port"`
+	// Endpoints are this device's own candidates as last reported;
+	// Symmetric is the NAT verdict.
+	Endpoints   []string     `json:"endpoints"`
+	Symmetric   bool         `json:"symmetric"`
 	Hub         *PeerStatus  `json:"hub,omitempty"`
 	Peers       []PeerStatus `json:"peers"`
 	RetrievedAt time.Time    `json:"retrieved_at"`
@@ -33,12 +40,20 @@ type Status struct {
 
 // PeerStatus joins netmap knowledge with device counters.
 type PeerStatus struct {
-	Name          string     `json:"name"`
-	IPv4          string     `json:"ipv4"`
-	Kind          string     `json:"kind,omitempty"`
-	Online        bool       `json:"online"`
-	PublicKey     string     `json:"public_key"`
-	Endpoint      string     `json:"endpoint,omitempty"`
+	Name      string `json:"name"`
+	IPv4      string `json:"ipv4"`
+	Kind      string `json:"kind,omitempty"`
+	Online    bool   `json:"online"`
+	PublicKey string `json:"public_key"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	// Path is idle, probing, direct or unreachable; PathEndpoint is the
+	// address the path uses.
+	Path         string `json:"path,omitempty"`
+	PathEndpoint string `json:"path_endpoint,omitempty"`
+	// Probes counts candidates tried since the peer appeared;
+	// Candidates are its addresses as delivered by the server.
+	Probes        int        `json:"probes"`
+	Candidates    []string   `json:"candidates"`
 	LastHandshake *time.Time `json:"last_handshake,omitempty"`
 	RxBytes       uint64     `json:"rx_bytes"`
 	TxBytes       uint64     `json:"tx_bytes"`
@@ -52,8 +67,14 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	st := Status{
 		Version: d.opts.Version, Name: d.state.Name, PeerID: d.state.PeerID, IPv4: d.state.IPv4, Server: d.state.Server,
 		Connected: connected, LastError: lastErr, Interface: d.opts.Interface, ListenPort: d.state.ListenPort,
-		Peers: []PeerStatus{}, RetrievedAt: d.opts.Now(),
+		Peers: []PeerStatus{}, Endpoints: []string{}, RetrievedAt: d.opts.Now(),
 	}
+	d.pmu.Lock()
+	for _, e := range d.selfEndpoints {
+		st.Endpoints = append(st.Endpoints, e.Addr.String())
+	}
+	st.Symmetric = d.selfSymmetric
+	d.pmu.Unlock()
 	stats := map[string]wg.PeerStats{}
 	if dev != nil {
 		st.Backend = dev.Backend()
@@ -93,11 +114,20 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		st.Hub = hub
 	}
 	for _, p := range nm.Peers {
-		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Online: p.Online, PublicKey: p.PublicKey}
-		if len(p.Endpoints) > 0 {
-			ps.Endpoint = p.Endpoints[0]
+		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Online: p.Online, PublicKey: p.PublicKey, Candidates: []string{}}
+		for _, e := range p.Endpoints {
+			ps.Candidates = append(ps.Candidates, e.Addr+" ("+e.Kind+")")
 		}
 		fill(&ps)
+		if state, ep, probes, ok := d.pathOf(p.ID); ok {
+			ps.Path, ps.Probes = string(state), probes
+			if ep.IsValid() {
+				ps.PathEndpoint = ep.String()
+			}
+		}
+		if ep, err := netip.ParseAddrPort(ps.Endpoint); err == nil && ep.Addr().IsLoopback() {
+			ps.Endpoint = "" // the sink, not a real address
+		}
 		st.Peers = append(st.Peers, ps)
 	}
 	return st
@@ -111,6 +141,16 @@ func (d *Daemon) localHandler() http.Handler {
 	mux.HandleFunc("POST /down", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		go d.Stop()
+	})
+	mux.HandleFunc("POST /ping/{name}", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		res, err := d.Ping(ctx, r.PathValue("name"))
+		if errors.Is(err, ErrUnknownPeer) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("POST /rotate-key", func(w http.ResponseWriter, r *http.Request) {
 		if err := d.RotateKey(r.Context()); err != nil {
@@ -137,7 +177,7 @@ type LocalClient struct {
 
 // NewLocalClient returns a client for the socket.
 func NewLocalClient(socket string) *LocalClient {
-	return &LocalClient{http: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+	return &LocalClient{http: &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", socket)
@@ -159,6 +199,13 @@ func (c *LocalClient) Down(ctx context.Context) error {
 // RotateKey asks the daemon to rotate its WireGuard key.
 func (c *LocalClient) RotateKey(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/rotate-key", nil)
+}
+
+// Ping asks the daemon to establish a path to the named peer and
+// returns its state once settled.
+func (c *LocalClient) Ping(ctx context.Context, name string) (PathResult, error) {
+	var res PathResult
+	return res, c.do(ctx, http.MethodPost, "/ping/"+url.PathEscape(name), &res)
 }
 
 func (c *LocalClient) do(ctx context.Context, method, path string, out any) error {

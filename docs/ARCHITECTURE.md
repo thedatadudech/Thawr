@@ -65,6 +65,8 @@ flowchart TD
   SRV --> WG[internal/wg]
   SRV --> WEB[web]
   SRV --> STORE[internal/store]
+  SRV --> STUN[internal/stun]
+  WG --> STUN
   API --> CTRL[internal/control]
   API --> RELAY
   CTRL --> STORE
@@ -76,10 +78,12 @@ flowchart TD
 | `internal/config` | Load one YAML file, apply defaults, validate | `Load(path) (*Config, error)`, `Config` struct, `Default()` | stdlib, yaml |
 | `internal/store` | Persist peers, users, tokens, policy generation in SQLite; run migrations | `Open(dsn) (*Store, error)`, `Store.Peers()`, `Store.Users()`, `Store.Tokens()`, `Store.Meta()`, each a small interface with ctx-first methods | `modernc.org/sqlite` |
 | `internal/control` | Everything that decides: enrollment, registry, key distribution (netmap), policy compilation, endpoint tracking, IP allocation | `Enroller`, `Registry`, `Policy` (parse + compile), `NetMapBuilder`, `EndpointTable`, `Allocator` | `internal/store` |
-| `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface, `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables |
+| `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface (`Configure` diffs peers in place, `SetPeer`, `RemovePeer`, `Stats`), `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `STUNCapable` (the userspace device sends STUN from its own socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables, `internal/stun` |
+| `internal/stun` | STUN binding codec (copied from Tailscale), `Discover` client with symmetric-NAT detection, rate-limited `Serve` | `Request`, `ParseResponse`, `Transport`, `Discover`, `Serve` | stdlib |
+| `internal/control/path` | Candidate ordering both sides compute identically and the per-peer path state machine (pure, clock and stats injected) | `Order`, `Machine.Step` | `internal/control` types |
 | `internal/relay` | Forward opaque packets between authenticated peers; local UDP proxy on the client | `Server`, `Client`, frame codec | `internal/control` (for auth + visibility check via a small interface) |
 | `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, `Combine` (one listener for both), protobuf under `internal/api/proto` generated with buf via `make proto` | `internal/control`, `internal/relay` |
-| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state, netmap cache), TLS fingerprint pinning, the Enroll call, the sync daemon and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `BuildConfig`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg` |
+| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state, netmap cache), TLS fingerprint pinning, the Enroll call, the sync daemon with endpoint discovery and the path prober, and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `Daemon.Ping`, `BuildConfig`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg`, `internal/stun`, `internal/control/path` |
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling | `main` | all of the above |
@@ -196,21 +200,43 @@ sequenceDiagram
 
 ### 4.4 Direct connectivity
 
-Clients learn their endpoints: local interface addresses with the
-WireGuard listen port, plus the server-reflexive address from STUN on
-both server STUN ports. If the two reflexive ports differ, the NAT is
-endpoint-dependent and the client reports `symmetric: true`.
+Clients learn their endpoints: local interface addresses (outside the
+overlay) with the WireGuard listen port, plus the server-reflexive
+address from STUN on both server STUN ports, whose `host:port` the
+netmap carries. If the two reflexive ports differ, the NAT is
+endpoint-dependent and the client reports `symmetric: true`. With
+`wireguard-go` the STUN request leaves from the WireGuard socket itself
+(a `conn.Bind` wrapper filters the responses out of the receive path),
+so the mapping is exact. The kernel module's UDP socket cannot be
+shared, so there STUN runs from an ephemeral socket: it yields the
+public IP and the symmetric verdict, the reflexive candidate assumes a
+port-preserving NAT, and the server adds the exact mapping it observes
+on the hub interface (the source address of the peer's WireGuard
+packets) as a further reflexive candidate. Reports go out on connect,
+when the local address set changes, and otherwise every 60 s.
 
-To reach peer B, client A orders B's candidates (same-LAN first, then
-reflexive, then hub-stable endpoints), sets B's WireGuard endpoint to the
-first candidate and sends a probe (ICMP echo to B's overlay address)
-which triggers a WireGuard handshake. B does the same toward A with the
-identical ordering, so both sides punch holes simultaneously. A candidate
-is accepted when `last_handshake_time` advances within 2 seconds. If the
-list is exhausted (10 seconds at most) the path falls back to the relay
-and re-probing repeats every 60 seconds. No userspace packet
-multiplexing: the kernel or `wireguard-go` device is always the one
-sending. Spec 004.
+Every netmap peer starts `idle`: its WireGuard endpoint points at a
+loopback sink socket the daemon owns, which never transmits. As soon as
+traffic for the peer is queued, WireGuard sends its handshake initiation
+to the sink and the daemon knows there is traffic intent (`thawr client
+ping <peer>` sets it explicitly). To reach peer B, client A orders B's
+candidates (local addresses sharing a /24 with one of A's, other local,
+reflexive, hub-stable; ties by address; reflexive skipped when both are
+symmetric), removes and re-adds B with the first candidate as endpoint
+(the re-add resets WireGuard's 5 s handshake retry timer) and sends one
+UDP datagram to B's overlay address through the interface, which makes
+WireGuard initiate a handshake there. B does the same toward A with the
+identical ordering, so both sides punch holes simultaneously; a
+handshake B initiates first is accepted too, and WireGuard's roaming
+moves the endpoint to wherever authenticated packets come from. A
+candidate is accepted when `last_handshake_time` advances within 2
+seconds. If the list is exhausted (10 seconds at most) the path is
+`unreachable` (the relay takes over in spec 005), re-probed when
+candidates change or, on fresh intent, at most every 60 seconds. A
+`direct` path with queued traffic but no handshake for 3 minutes is
+re-probed. Path states are reported to the server (`ReportPath`) and
+shown in the admin UI. No userspace packet multiplexing: the kernel or
+`wireguard-go` device is always the one sending. Spec 004.
 
 ### 4.5 Relay fallback
 
@@ -305,8 +331,9 @@ access is filesystem permission (`root` and group `thawr`).
 `thawr client status` talks to the running daemon over
 `/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
 supports `AF_UNIX`) with a tiny JSON-over-HTTP API: `GET /status`,
-`POST /down`, `POST /rotate-key`, and from spec 004 `POST /reprobe`.
-Spec 007 formats the output.
+`POST /down`, `POST /rotate-key`, and `POST /ping/{name}` (mark traffic
+intent, probe, answer with the settled path). Spec 007 formats the
+output.
 
 ## 6. Storage
 

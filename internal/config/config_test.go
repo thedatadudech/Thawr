@@ -60,6 +60,9 @@ func TestDerivedValues(t *testing.T) {
 	if got, want := cfg.HubAddr(), netip.MustParsePrefix("100.64.0.1/10"); got != want {
 		t.Errorf("HubAddr: got %s, want %s", got, want)
 	}
+	if got := cfg.STUNEndpoints(); len(got) != 2 || got[0] != "vpn.example.com:3478" || got[1] != "vpn.example.com:3479" {
+		t.Errorf("STUNEndpoints = %v", got)
+	}
 	if got := cfg.HubEndpoint(); got != "vpn.example.com:51820" {
 		t.Errorf("HubEndpoint: %q", got)
 	}

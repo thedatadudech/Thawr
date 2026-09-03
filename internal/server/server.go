@@ -24,6 +24,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/policy"
 	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/thedatadudech/thawr/internal/stun"
 	"github.com/thedatadudech/thawr/internal/wg"
 	"github.com/thedatadudech/thawr/web"
 )
@@ -47,6 +48,9 @@ type Deps struct {
 	UI fs.FS
 	// HubOptions tune presence timing (tests).
 	HubOptions control.HubOptions
+	// ObserveInterval is how often the hub interface's peer endpoints
+	// are read into the endpoint table (15 s).
+	ObserveInterval time.Duration
 }
 
 // Server is the composed control server.
@@ -76,6 +80,7 @@ type Server struct {
 	ready     chan struct{}
 	readyOnce sync.Once
 	httpsAddr atomic.Pointer[string]
+	stunAddrs atomic.Pointer[[]string]
 }
 
 // New validates cfg and prepares a Server. Nothing is touched on disk
@@ -98,6 +103,9 @@ func New(cfg *config.Config, deps Deps) (*Server, error) {
 	}
 	if deps.Version == "" {
 		deps.Version = "dev"
+	}
+	if deps.ObserveInterval <= 0 {
+		deps.ObserveInterval = 15 * time.Second
 	}
 	if deps.UI == nil {
 		ui, err := web.Static()
@@ -208,7 +216,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
-		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub,
+		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths,
 		Join: s.JoinInfo(), Sessions: s.sessions,
 	}
 	webHandler, err := api.NewREST(restDeps)
@@ -244,6 +252,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	defer stopHub()
 	go s.hub.RunSweeper(hubCtx, 5*time.Second)
 	go s.followRegistry(hubCtx)
+	go s.observeHub(hubCtx)
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -333,10 +342,13 @@ func (s *Server) reloadPolicy() {
 	s.log.Info("policy reloaded", "path", s.cfg.PolicyFile, "rules", len(p.ACLs))
 }
 
+// bindSTUN binds every configured STUN address and serves binding
+// requests on each until ctx ends.
 func (s *Server) bindSTUN(ctx context.Context) ([]net.PacketConn, error) {
 	var (
 		lc    net.ListenConfig
 		conns []net.PacketConn
+		addrs []string
 	)
 	for _, addr := range s.cfg.Listen.STUN {
 		c, err := lc.ListenPacket(ctx, "udp", addr)
@@ -347,21 +359,76 @@ func (s *Server) bindSTUN(ctx context.Context) ([]net.PacketConn, error) {
 			return nil, fmt.Errorf("server: bind stun %s: %w", addr, err)
 		}
 		conns = append(conns, c)
-		// TODO(2026-09-02): spec 004 replaces the drain with the STUN server.
-		go drain(c)
-		s.log.Info("stun listener bound (responses arrive with spec 004)", "addr", c.LocalAddr().String())
+		addrs = append(addrs, c.LocalAddr().String())
+		go func() {
+			if err := stun.Serve(ctx, c, stun.ServerOptions{Now: s.deps.Now, Logger: s.log}); err != nil && ctx.Err() == nil {
+				s.log.Error("stun listener stopped", "addr", c.LocalAddr().String(), "err", err)
+			}
+		}()
+		s.log.Info("stun listener ready", "addr", c.LocalAddr().String())
 	}
+	s.stunAddrs.Store(&addrs)
 	return conns, nil
 }
 
-// drain reads and discards datagrams until the socket closes.
-func drain(c net.PacketConn) {
-	buf := make([]byte, 1500)
+// STUNAddrs reports the bound STUN listener addresses (tests).
+func (s *Server) STUNAddrs() []string {
+	if p := s.stunAddrs.Load(); p != nil {
+		return append([]string(nil), (*p)...)
+	}
+	return nil
+}
+
+// observeHub copies, every ObserveInterval, the address each peer's
+// WireGuard packets reach the hub from into the endpoint table, so
+// peers learn each other's exact NAT mapping without STUN on the
+// WireGuard port.
+func (s *Server) observeHub(ctx context.Context) {
+	t := time.NewTicker(s.deps.ObserveInterval)
+	defer t.Stop()
 	for {
-		if _, _, err := c.ReadFrom(buf); err != nil {
+		select {
+		case <-ctx.Done():
 			return
+		case <-t.C:
+		}
+		if err := s.observeOnce(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("hub endpoint observation", "err", err)
 		}
 	}
+}
+
+func (s *Server) observeOnce(ctx context.Context) error {
+	stats, err := s.device.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	peers, err := s.st.Peers().List(ctx)
+	if err != nil {
+		return err
+	}
+	byKey := make(map[string]string, len(peers))
+	for _, p := range peers {
+		byKey[p.PublicKey] = p.ID
+	}
+	changed := false
+	for _, st := range stats {
+		if !st.Endpoint.IsValid() || st.LastHandshake.IsZero() {
+			continue
+		}
+		id, ok := byKey[st.PublicKey.String()]
+		if !ok {
+			continue
+		}
+		if s.endpoints.SetObserved(id, st.Endpoint) {
+			changed = true
+			s.log.Debug("hub observed peer endpoint", "peer", id, "endpoint", st.Endpoint)
+		}
+	}
+	if changed {
+		s.hub.Changed()
+	}
+	return nil
 }
 
 func (s *Server) listenHTTPS(ctx context.Context, h http.Handler) (*http.Server, net.Listener, error) {
@@ -492,6 +559,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Endpoint:  s.cfg.HubEndpoint(),
 		Address:   s.cfg.HubAddr().Addr(),
 		Overlay:   s.cfg.OverlayPrefix(),
+		STUNAddrs: s.cfg.STUNEndpoints(),
 	}, hub.Generation)
 	return nil
 }

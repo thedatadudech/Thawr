@@ -10,6 +10,7 @@ import (
 	"time"
 
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
+	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -31,20 +32,73 @@ type NetMap struct {
 	Peers      []Peer    `json:"peers"`
 	Hub        HubPeer   `json:"hub"`
 	ReceivedAt time.Time `json:"received_at"`
+	// STUN lists the server's STUN listeners as host:port.
+	STUN []string `json:"stun"`
+}
+
+// Endpoint is one candidate address of a peer with its kind
+// ("local", "reflexive" or "stable").
+type Endpoint struct {
+	Addr string `json:"addr"`
+	Kind string `json:"kind"`
+}
+
+// Endpoint kind names as cached and shown in status.
+const (
+	KindLocal     = "local"
+	KindReflexive = "reflexive"
+	KindStable    = "stable"
+)
+
+func kindFromProto(k thawrv1.EndpointKind) string {
+	switch k {
+	case thawrv1.EndpointKind_ENDPOINT_KIND_LOCAL:
+		return KindLocal
+	case thawrv1.EndpointKind_ENDPOINT_KIND_REFLEXIVE:
+		return KindReflexive
+	case thawrv1.EndpointKind_ENDPOINT_KIND_STABLE:
+		return KindStable
+	}
+	return ""
+}
+
+func kindFromName(s string) control.EndpointKind {
+	switch s {
+	case KindLocal:
+		return control.EndpointLocal
+	case KindReflexive:
+		return control.EndpointReflexive
+	case KindStable:
+		return control.EndpointStable
+	}
+	return 0
+}
+
+// Candidates returns the peer's parseable endpoints in netmap order.
+func (p Peer) Candidates() []control.Endpoint {
+	out := make([]control.Endpoint, 0, len(p.Endpoints))
+	for _, e := range p.Endpoints {
+		ap, err := netip.ParseAddrPort(e.Addr)
+		if err != nil {
+			continue
+		}
+		out = append(out, control.Endpoint{Addr: ap, Kind: kindFromName(e.Kind)})
+	}
+	return out
 }
 
 // Peer is one visible peer.
 type Peer struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	PublicKey  string   `json:"public_key"`
-	IPv4       string   `json:"ipv4"`
-	Online     bool     `json:"online"`
-	Endpoints  []string `json:"endpoints"`
-	Symmetric  bool     `json:"symmetric"`
-	Keepalive  bool     `json:"keepalive"`
-	AllowedIPs []string `json:"allowed_ips"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Kind       string     `json:"kind"`
+	PublicKey  string     `json:"public_key"`
+	IPv4       string     `json:"ipv4"`
+	Online     bool       `json:"online"`
+	Endpoints  []Endpoint `json:"endpoints"`
+	Symmetric  bool       `json:"symmetric"`
+	Keepalive  bool       `json:"keepalive"`
+	AllowedIPs []string   `json:"allowed_ips"`
 }
 
 // HubPeer is the server's WireGuard interface.
@@ -65,13 +119,14 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		Peers:      []Peer{},
 		Hub:        HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...)},
 		ReceivedAt: now,
+		STUN:       append([]string{}, m.GetSelf().GetStunAddrs()...),
 	}
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
 			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(),
-			Endpoints: []string{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...)}
+			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...)}
 		for _, e := range p.GetEndpoints() {
-			peer.Endpoints = append(peer.Endpoints, e.GetAddr())
+			peer.Endpoints = append(peer.Endpoints, Endpoint{Addr: e.GetAddr(), Kind: kindFromProto(e.GetKind())})
 		}
 		nm.Peers = append(nm.Peers, peer)
 	}
@@ -103,8 +158,9 @@ func LoadNetMap(dir string) (nm NetMap, ok bool, err error) {
 }
 
 // BuildConfig turns a netmap into the full WireGuard configuration of
-// this device: every visible peer with its allowed prefixes and, when
-// known, its first endpoint candidate; the hub with keepalive.
+// this device: every visible peer with its allowed prefixes and the hub
+// with its endpoint and keepalive. Mesh peers get no endpoint here; the
+// path prober owns it (a zero endpoint leaves the device's current one).
 func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (wg.Config, error) {
 	selfIP, err := netip.ParseAddr(nm.SelfIPv4)
 	if err != nil {
@@ -145,14 +201,6 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 		}
 		if ip, err := netip.ParseAddr(p.IPv4); err == nil && len(peer.AllowedIPs) == 0 {
 			peer.AllowedIPs = []netip.Prefix{netip.PrefixFrom(ip, 32)}
-		}
-		// TODO(2026-09-03): spec 004 replaces "first candidate" with the
-		// path state machine.
-		for _, e := range p.Endpoints {
-			if ap, err := netip.ParseAddrPort(e); err == nil {
-				peer.Endpoint = ap
-				break
-			}
 		}
 		cfg.Peers = append(cfg.Peers, peer)
 	}

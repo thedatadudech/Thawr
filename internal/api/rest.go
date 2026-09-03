@@ -23,7 +23,9 @@ type RESTDeps struct {
 	Peers  PeersService
 	// Presence reports online peers; nil means unknown.
 	Presence PresenceSource
-	Join     JoinInfo
+	// Paths reports how each peer reaches the others; nil means unknown.
+	Paths PathsSource
+	Join  JoinInfo
 	// Sessions backs cookie logins on the HTTPS listener.
 	Sessions *Sessions
 	// Local marks the admin-socket handler: every request acts as the

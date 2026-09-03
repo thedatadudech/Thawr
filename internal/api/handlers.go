@@ -52,6 +52,11 @@ type PresenceSource interface {
 	Online(peerID string) bool
 }
 
+// PathsSource returns the path states a peer last reported.
+type PathsSource interface {
+	Get(peerID string) []control.PathState
+}
+
 // JoinInfo is what a new client needs besides the token: where the
 // server is and which certificate to trust.
 type JoinInfo struct {
@@ -316,7 +321,38 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.peerView(r.Context(), peer, map[string]string{}))
+	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}), Paths: []pathView{}}
+	if h.deps.Paths != nil {
+		names := map[string]string{}
+		if all, err := h.deps.Peers.List(r.Context(), p); err == nil {
+			for _, q := range all {
+				names[q.ID] = q.Name
+			}
+		}
+		for _, ps := range h.deps.Paths.Get(peer.ID) {
+			name, ok := names[ps.PeerID]
+			if !ok {
+				// Not visible to this principal: the target is not named.
+				continue
+			}
+			detail.Paths = append(detail.Paths, pathView{Peer: name, State: ps.State, Endpoint: ps.Endpoint, UpdatedAt: ps.Updated.UTC().Format(timeFormat)})
+		}
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// peerDetail is one peer with the paths it reported.
+type peerDetail struct {
+	peerView
+	Paths []pathView `json:"paths"`
+}
+
+// pathView is how a peer reaches one other peer.
+type pathView struct {
+	Peer      string `json:"peer"`
+	State     string `json:"state"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 func (h *rest) handleRenamePeer(w http.ResponseWriter, r *http.Request) {

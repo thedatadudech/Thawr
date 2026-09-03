@@ -422,11 +422,13 @@ func (x *NetMap) GetKeepalive() bool {
 
 // SelfInfo describes the receiving peer.
 type SelfInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Ipv4          string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
-	OverlayCidr   string                 `protobuf:"bytes,4,opt,name=overlay_cidr,json=overlayCidr,proto3" json:"overlay_cidr,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Ipv4        string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	OverlayCidr string                 `protobuf:"bytes,4,opt,name=overlay_cidr,json=overlayCidr,proto3" json:"overlay_cidr,omitempty"`
+	// stun_addrs are the server's STUN listeners as host:port (one or two).
+	StunAddrs     []string `protobuf:"bytes,5,rep,name=stun_addrs,json=stunAddrs,proto3" json:"stun_addrs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -487,6 +489,13 @@ func (x *SelfInfo) GetOverlayCidr() string {
 		return x.OverlayCidr
 	}
 	return ""
+}
+
+func (x *SelfInfo) GetStunAddrs() []string {
+	if x != nil {
+		return x.StunAddrs
+	}
+	return nil
 }
 
 // NetPeer is one visible peer.
@@ -1126,12 +1135,14 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x05peers\x18\x03 \x03(\v2\x11.thawr.v1.NetPeerR\x05peers\x12#\n" +
 	"\x03hub\x18\x04 \x01(\v2\x11.thawr.v1.HubPeerR\x03hub\x12,\n" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
-	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"e\n" +
+	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"\x84\x01\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04ipv4\x18\x03 \x01(\tR\x04ipv4\x12!\n" +
-	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\"\x9b\x02\n" +
+	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\x12\x1d\n" +
+	"\n" +
+	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\"\x9b\x02\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
