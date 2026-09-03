@@ -5,17 +5,78 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Thawr</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 40rem; padding: 0 1rem; color: #222; }
-    h1 { font-weight: 600; }
-    .logo { display: block; width: 160px; margin-bottom: 1rem; }
-    code { background: #f2f2f2; padding: .1rem .3rem; }
-  </style>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <img class="logo" src="/logo.svg" alt="">
-  <h1>Thawr</h1>
-  <p>One binary. No cloud. Works offline.</p>
-  <p>The admin UI is served from this embedded page once the REST API exists (spec 002).</p>
+  <header>
+    <img class="logo" src="/logo.svg" alt="">
+    <h1>Thawr</h1>
+    <span id="who" class="who"></span>
+    <button id="logout" class="link" hidden>Log out</button>
+  </header>
+
+  <main>
+    <section id="login" hidden>
+      <h2>Log in</h2>
+      <form id="login-form">
+        <label>Name <input name="name" autocomplete="username" required></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Log in</button>
+        <p class="error" id="login-error"></p>
+      </form>
+    </section>
+
+    <section id="app" hidden>
+      <div class="row">
+        <h2>Peers</h2>
+        <button id="refresh" class="link">Refresh</button>
+      </div>
+      <table id="peers">
+        <thead><tr><th>Name</th><th>IP</th><th>Kind</th><th>Owner</th><th>Tags</th><th>Created</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h2>Create enrollment token</h2>
+      <form id="token-form" class="grid">
+        <label>Owner <input name="owner" required placeholder="user name"></label>
+        <label>Kind
+          <select name="kind"><option>human</option><option>server</option><option>agent</option></select>
+        </label>
+        <label>Tags <input name="tags" placeholder="tag:prod, tag:ci"></label>
+        <label>Peer name <input name="peer_name" placeholder="optional"></label>
+        <label>Expires <input name="expires" value="1h"></label>
+        <button type="submit">Create token</button>
+        <p class="error" id="token-error"></p>
+      </form>
+      <div id="token-result" class="notice" hidden>
+        <p><strong>Copy this now.</strong> The token is shown once and cannot be retrieved again.</p>
+        <pre id="join-command"></pre>
+        <button id="copy" class="link">Copy join command</button>
+        <button id="dismiss" class="link">Dismiss</button>
+      </div>
+
+      <h2>Tokens</h2>
+      <table id="tokens">
+        <thead><tr><th>ID</th><th>Owner</th><th>Kind</th><th>Tags</th><th>Expires</th><th>State</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <section id="users-section" hidden>
+        <h2>Users</h2>
+        <table id="users">
+          <thead><tr><th>Name</th><th>Role</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <form id="user-form" class="grid">
+          <label>Name <input name="name" required></label>
+          <label>Role <select name="role"><option>member</option><option>admin</option></select></label>
+          <label>Password <input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+          <button type="submit">Create user</button>
+          <p class="error" id="user-error"></p>
+        </form>
+      </section>
+    </section>
+  </main>
+  <script src="/app.js"></script>
 </body>
 </html>
