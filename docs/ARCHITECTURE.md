@@ -79,7 +79,7 @@ flowchart TD
 | `internal/wg` | Talk to a WireGuard device without knowing about Thawr | `Device` interface, `Open(ctx, Options)` (kernel via wgctrl on Linux, else wireguard-go configured through its in-process IPC API, no UAPI socket), `Filter` interface (spec 006), `wgtest.Fake` | `wgctrl`, `wireguard-go`, netlink / nftables |
 | `internal/relay` | Forward opaque packets between authenticated peers; local UDP proxy on the client | `Server`, `Client`, frame codec | `internal/control` (for auth + visibility check via a small interface) |
 | `internal/api` | gRPC service and REST handlers; translate wire types to `control` calls; no business logic | `NewGRPC(deps)`, `NewREST(deps)`, `Combine` (one listener for both), protobuf under `internal/api/proto` generated with buf via `make proto` | `internal/control`, `internal/relay` |
-| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state), TLS fingerprint pinning, the Enroll call; the daemon arrives with spec 003 | `Enroll(ctx, Options)`, `LoadState`, `SaveState`, `Forget`, `PinnedTLSConfig`, `ProbeFingerprint` | `internal/api/proto`, `internal/wg` |
+| `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state, netmap cache), TLS fingerprint pinning, the Enroll call, the sync daemon and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `BuildConfig`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg` |
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling | `main` | all of the above |
@@ -153,10 +153,15 @@ code. Spec 002.
 
 ### 4.3 Key distribution (netmap sync)
 
-The server holds a **netmap generation** counter. Any change to peers,
-endpoints, or policy increments it. Each client holds one server-streaming
-gRPC call `Sync`. On connect and on every generation change the server
-computes that peer's view:
+The server holds a **netmap generation**: a persisted counter bumped by
+every change to peers or policy, mirrored by an in-memory sequence in
+the presence hub that also advances on endpoint and presence changes
+and is what netmaps and the status endpoint carry. Each client holds
+one server-streaming gRPC call `Sync`. On connect the server always
+sends a full map (the client's reported generation is informational);
+on every change affecting the peer, coalesced over 200 ms, and every
+30 s as a keepalive, it sends the full map again. It computes that
+peer's view:
 
 - the peers it may talk to (policy says A→B or B→A allows at least one
   port), each with public key, ipv4, current endpoint candidates, online
@@ -165,9 +170,15 @@ computes that peer's view:
 - the receiver-side filter rules for this peer (source ipv4 → allowed
   proto/ports)
 
-The client diffs the netmap against the WireGuard device: adds, updates
-(endpoint, allowed IPs), removes peers; installs the filter. Removing a
-peer on the server propagates to every client within 5 seconds. Spec 003.
+The client turns every netmap into the complete WireGuard configuration
+and applies it (adapters replace the peer set; WireGuard keeps sessions
+for unchanged keys), caches it on disk, and installs the filter (spec
+006). A peer is online while its `Sync` stream is open and for 90 s
+after it drops. Removing a peer on the server propagates to every
+client within 5 seconds and closes that peer's stream. The server's
+hub interface carries every registered peer as a WireGuard peer, so
+clients' keepalives toward the hub keep a tunnel to the server open.
+Spec 003.
 
 ```mermaid
 sequenceDiagram
@@ -292,9 +303,10 @@ access is filesystem permission (`root` and group `thawr`).
 ### Client local API
 
 `thawr client status` talks to the running daemon over
-`/var/run/thawr/client.sock` (Windows: `\\.\pipe\thawr`) with a tiny
-JSON-over-HTTP API: `GET /status`, `POST /down`, `POST /reprobe`. Spec
-007.
+`/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
+supports `AF_UNIX`) with a tiny JSON-over-HTTP API: `GET /status`,
+`POST /down`, `POST /rotate-key`, and from spec 004 `POST /reprobe`.
+Spec 007 formats the output.
 
 ## 6. Storage
 
@@ -314,7 +326,8 @@ Indexes: `peers(public_key)` unique, `peers(name)` unique,
 | Path | Content | Mode |
 |---|---|---|
 | `/var/lib/thawr/client/node.key` | WireGuard private key | 0600 |
-| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, last netmap | 0600 |
+| `/var/lib/thawr/client/state.json` | server URL, TLS fingerprint, peer id, node secret, listen port | 0600 |
+| `/var/lib/thawr/client/netmap.json` | last netmap (public keys, addresses, endpoints) | 0600 |
 
 macOS: `/Library/Application Support/Thawr/`. Windows: `%ProgramData%\Thawr\`.
 The cached netmap lets the client restore WireGuard peers before the

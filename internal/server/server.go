@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/thedatadudech/thawr/internal/api"
 	"github.com/thedatadudech/thawr/internal/config"
 	"github.com/thedatadudech/thawr/internal/control"
@@ -43,6 +45,8 @@ type Deps struct {
 	Version string
 	// UI is the embedded admin UI; defaults to web.Static().
 	UI fs.FS
+	// HubOptions tune presence timing (tests).
+	HubOptions control.HubOptions
 }
 
 // Server is the composed control server.
@@ -59,11 +63,15 @@ type Server struct {
 	policy         atomic.Pointer[policy.Policy]
 	startedAt      time.Time
 
-	users    *control.Users
-	tokens   *control.Tokens
-	enroller *control.Enroller
-	registry *control.Registry
-	sessions *api.Sessions
+	users     *control.Users
+	tokens    *control.Tokens
+	enroller  *control.Enroller
+	registry  *control.Registry
+	sessions  *api.Sessions
+	hub       *control.Hub
+	endpoints *control.EndpointTable
+	paths     *control.PathTable
+	netmaps   *control.NetMapBuilder
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -180,21 +188,27 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		return err
 	}
 
-	if err := s.buildServices(); err != nil {
+	if err := s.buildServices(ctx); err != nil {
 		return err
 	}
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
-		Enroller: s.enroller,
-		Hub:      api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()},
-		Version:  s.deps.Version,
-		Logger:   s.log,
+		Enroller:  s.enroller,
+		Hub:       api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()},
+		Version:   s.deps.Version,
+		Logger:    s.log,
+		NodeAuth:  s.registry,
+		NetMaps:   s.netmaps,
+		Sync:      s.hub,
+		Peers:     s.registry,
+		Endpoints: s.endpoints,
+		Paths:     s.paths,
 	})
 	if err != nil {
 		return err
 	}
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
-		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry,
+		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub,
 		Join: s.JoinInfo(), Sessions: s.sessions,
 	}
 	webHandler, err := api.NewREST(restDeps)
@@ -226,6 +240,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		return err
 	}
 
+	hubCtx, stopHub := context.WithCancel(ctx)
+	defer stopHub()
+	go s.hub.RunSweeper(hubCtx, 5*time.Second)
+	go s.followRegistry(hubCtx)
+
 	errCh := make(chan error, 2)
 	go func() {
 		if e := httpsSrv.ServeTLS(httpsLn, "", ""); e != nil && !errors.Is(e, http.ErrServerClosed) {
@@ -248,7 +267,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	for {
 		select {
 		case <-ctx.Done():
-			grpcSrv.GracefulStop()
+			stopGRPC(grpcSrv, shutdownTimeout/2)
 			return s.shutdown(httpsSrv, adminSrv)
 		case e := <-errCh:
 			grpcSrv.Stop()
@@ -418,22 +437,24 @@ func (s *Server) Status(ctx context.Context) (api.Status, error) {
 	if err != nil {
 		return api.Status{}, err
 	}
-	genRaw, err := s.st.Meta().Get(ctx, store.MetaNetmapGeneration)
-	if err != nil {
-		return api.Status{}, err
+	st := api.Status{
+		Version:        s.deps.Version,
+		UptimeSeconds:  int64(s.deps.Now().Sub(s.startedAt).Seconds()),
+		PeerCount:      count,
+		TLSFingerprint: s.tlsFingerprint,
+		HubPublicKey:   s.hubKey.PublicKey().String(),
 	}
-	gen, err := strconv.ParseInt(genRaw, 10, 64)
-	if err != nil {
-		return api.Status{}, fmt.Errorf("server: netmap generation %q: %w", genRaw, err)
+	if s.hub != nil {
+		st.NetmapGeneration = s.hub.Generation()
+		st.OnlinePeers = s.hub.OnlineCount()
+	} else {
+		gen, err := s.st.Meta().Generation(ctx)
+		if err != nil {
+			return api.Status{}, err
+		}
+		st.NetmapGeneration = gen
 	}
-	return api.Status{
-		Version:          s.deps.Version,
-		UptimeSeconds:    int64(s.deps.Now().Sub(s.startedAt).Seconds()),
-		PeerCount:        count,
-		NetmapGeneration: gen,
-		TLSFingerprint:   s.tlsFingerprint,
-		HubPublicKey:     s.hubKey.PublicKey().String(),
-	}, nil
+	return st, nil
 }
 
 func listenPort(addr string) (int, error) {
@@ -449,18 +470,82 @@ func listenPort(addr string) (int, error) {
 }
 
 // buildServices wires the control-plane services on the open store.
-func (s *Server) buildServices() error {
+func (s *Server) buildServices(ctx context.Context) error {
 	users, err := control.NewUsers(s.st, s.deps.Now, s.log)
 	if err != nil {
 		return err
 	}
+	hub, err := control.NewHub(ctx, s.st, s.deps.Now, s.log, s.deps.HubOptions)
+	if err != nil {
+		return err
+	}
 	s.users = users
+	s.hub = hub
+	s.endpoints = control.NewEndpointTable(s.deps.Now)
+	s.paths = control.NewPathTable(s.deps.Now)
 	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log)
-	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion)
-	s.registry = control.NewRegistry(s.st, s.log)
+	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub)
+	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now)
 	s.sessions = api.NewSessions(s.deps.Now)
+	s.netmaps = control.NewNetMapBuilder(s.st, control.OwnerVisibility{}, s.endpoints, hub, control.HubConfig{
+		PublicKey: s.hubKey.PublicKey().String(),
+		Endpoint:  s.cfg.HubEndpoint(),
+		Address:   s.cfg.HubAddr().Addr(),
+		Overlay:   s.cfg.OverlayPrefix(),
+	}, hub.Generation)
 	return nil
 }
+
+// followRegistry keeps the hub WireGuard interface's peer list equal to
+// the registered peers, rebuilding it on every hub wake-up.
+func (s *Server) followRegistry(ctx context.Context) {
+	wake, unsubscribe := s.hub.Subscribe("hub-device")
+	defer unsubscribe()
+	for {
+		if err := s.configureHub(ctx); err != nil && ctx.Err() == nil {
+			s.log.Error("hub device update", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+		}
+	}
+}
+
+// configureHub applies the full hub configuration: every registered
+// peer is a WireGuard peer with its /32 and no endpoint (peers initiate).
+func (s *Server) configureHub(ctx context.Context) error {
+	peers, err := s.st.Peers().List(ctx)
+	if err != nil {
+		return err
+	}
+	port, err := listenPort(s.cfg.Listen.WireGuard)
+	if err != nil {
+		return err
+	}
+	cfg := wg.Config{PrivateKey: s.hubKey, ListenPort: port, Addresses: []netip.Prefix{s.cfg.HubAddr()}}
+	for _, p := range peers {
+		key, err := wg.ParseKey(p.PublicKey)
+		if err != nil {
+			s.log.Warn("hub: skipping peer with bad key", "peer", p.Name)
+			continue
+		}
+		ip, err := netip.ParseAddr(p.IPv4)
+		if err != nil {
+			continue
+		}
+		cfg.Peers = append(cfg.Peers, wg.Peer{PublicKey: key, AllowedIPs: []netip.Prefix{netip.PrefixFrom(ip, 32)}})
+	}
+	if err := s.device.Configure(ctx, cfg); err != nil {
+		return err
+	}
+	s.log.Debug("hub device configured", "peers", len(cfg.Peers))
+	return nil
+}
+
+// Hub exposes the presence hub (tests and status).
+func (s *Server) Hub() *control.Hub { return s.hub }
 
 // JoinInfo is the server URL and TLS fingerprint new clients need.
 func (s *Server) JoinInfo() api.JoinInfo {
@@ -479,4 +564,20 @@ func (s *Server) publicURL() string {
 		return "https://" + host
 	}
 	return "https://" + net.JoinHostPort(host, port)
+}
+
+// stopGRPC drains gracefully but never waits longer than timeout: open
+// Sync streams only end when their client goes away.
+func stopGRPC(srv *grpc.Server, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		srv.Stop()
+		<-done
+	}
 }

@@ -225,3 +225,36 @@ func TestGeneration(t *testing.T) {
 		t.Errorf("generation after increments: %d", g)
 	}
 }
+
+func TestPeersSetPublicKeyTouchListByMode(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	for _, p := range []Peer{
+		{ID: "p1", Name: "a", Kind: KindHuman, Mode: ModeAgent, PublicKey: "k1", IPv4: "100.64.0.2", CreatedAt: now()},
+		{ID: "p2", Name: "b", Kind: KindHuman, Mode: ModeStatic, PublicKey: "k2", IPv4: "100.64.0.3", CreatedAt: now()},
+	} {
+		if err := s.Peers().Create(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Peers().SetPublicKey(ctx, "p1", "k2"); !errors.Is(err, ErrConflict) {
+		t.Errorf("key in use: %v", err)
+	}
+	if err := s.Peers().SetPublicKey(ctx, "nope", "k3"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing peer: %v", err)
+	}
+	if err := s.Peers().SetPublicKey(ctx, "p1", "k3"); err != nil {
+		t.Errorf("SetPublicKey: %v", err)
+	}
+	if err := s.Peers().Touch(ctx, "p1", now().Add(time.Minute)); err != nil {
+		t.Errorf("Touch: %v", err)
+	}
+	got, _ := s.Peers().GetByID(ctx, "p1")
+	if got.PublicKey != "k3" || got.LastSeenAt == nil || !got.LastSeenAt.Equal(now().Add(time.Minute)) {
+		t.Errorf("after update: %+v", got)
+	}
+	agents, err := s.Peers().ListByMode(ctx, ModeAgent)
+	if err != nil || len(agents) != 1 || agents[0].ID != "p1" {
+		t.Errorf("ListByMode: %v %v", agents, err)
+	}
+}

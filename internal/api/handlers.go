@@ -47,6 +47,11 @@ type PeersService interface {
 	Delete(ctx context.Context, by control.Principal, name string) error
 }
 
+// PresenceSource reports whether a peer currently has a Sync stream.
+type PresenceSource interface {
+	Online(peerID string) bool
+}
+
 // JoinInfo is what a new client needs besides the token: where the
 // server is and which certificate to trust.
 type JoinInfo struct {
@@ -269,6 +274,7 @@ type peerView struct {
 	Tags       []string `json:"tags"`
 	PublicKey  string   `json:"public_key"`
 	IPv4       string   `json:"ipv4"`
+	Online     bool     `json:"online"`
 	CreatedAt  string   `json:"created_at"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
 }
@@ -281,6 +287,9 @@ func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]stri
 	}
 	if p.LastSeenAt != nil {
 		v.LastSeenAt = p.LastSeenAt.UTC().Format(timeFormat)
+	}
+	if h.deps.Presence != nil {
+		v.Online = h.deps.Presence.Online(p.ID)
 	}
 	return v
 }

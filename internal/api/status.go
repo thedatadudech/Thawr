@@ -8,6 +8,7 @@ type Status struct {
 	UptimeSeconds    int64  `json:"uptime_seconds"`
 	PeerCount        int    `json:"peer_count"`
 	NetmapGeneration int64  `json:"netmap_generation"`
+	OnlinePeers      int    `json:"online_peers"`
 	TLSFingerprint   string `json:"tls_fingerprint"`
 	HubPublicKey     string `json:"hub_public_key"`
 }

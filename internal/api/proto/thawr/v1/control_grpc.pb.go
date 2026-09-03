@@ -19,19 +19,34 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Control_Enroll_FullMethodName = "/thawr.v1.Control/Enroll"
+	Control_Enroll_FullMethodName          = "/thawr.v1.Control/Enroll"
+	Control_Sync_FullMethodName            = "/thawr.v1.Control/Sync"
+	Control_ReportEndpoints_FullMethodName = "/thawr.v1.Control/ReportEndpoints"
+	Control_ReportPath_FullMethodName      = "/thawr.v1.Control/ReportPath"
+	Control_RotateKey_FullMethodName       = "/thawr.v1.Control/RotateKey"
+	Control_Leave_FullMethodName           = "/thawr.v1.Control/Leave"
 )
 
 // ControlClient is the client API for Control service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Control is the client-to-server control channel.
-// Spec 002 adds Enroll; spec 003 adds Sync, ReportEndpoints, RotateKey
-// and Leave.
+// Control is the client-to-server control channel. Every RPC except
+// Enroll carries the node secret as "authorization: Bearer <secret>".
 type ControlClient interface {
 	// Enroll registers a new agent peer with a one-time token.
 	Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error)
+	// Sync streams the caller's netmap: a full map on connect, a full map
+	// on every change affecting the caller, and a keepalive map every 30 s.
+	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[NetMap], error)
+	// ReportEndpoints replaces the caller's endpoint candidates.
+	ReportEndpoints(ctx context.Context, in *EndpointReport, opts ...grpc.CallOption) (*Empty, error)
+	// ReportPath records the caller's path state per peer for status.
+	ReportPath(ctx context.Context, in *PathReport, opts ...grpc.CallOption) (*Empty, error)
+	// RotateKey replaces the caller's WireGuard public key.
+	RotateKey(ctx context.Context, in *RotateKeyRequest, opts ...grpc.CallOption) (*RotateKeyResponse, error)
+	// Leave removes the caller from the network.
+	Leave(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type controlClient struct {
@@ -52,16 +67,85 @@ func (c *controlClient) Enroll(ctx context.Context, in *EnrollRequest, opts ...g
 	return out, nil
 }
 
+func (c *controlClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[NetMap], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[0], Control_Sync_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SyncRequest, NetMap]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_SyncClient = grpc.ServerStreamingClient[NetMap]
+
+func (c *controlClient) ReportEndpoints(ctx context.Context, in *EndpointReport, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Control_ReportEndpoints_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) ReportPath(ctx context.Context, in *PathReport, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Control_ReportPath_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) RotateKey(ctx context.Context, in *RotateKeyRequest, opts ...grpc.CallOption) (*RotateKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RotateKeyResponse)
+	err := c.cc.Invoke(ctx, Control_RotateKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) Leave(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Control_Leave_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
 //
-// Control is the client-to-server control channel.
-// Spec 002 adds Enroll; spec 003 adds Sync, ReportEndpoints, RotateKey
-// and Leave.
+// Control is the client-to-server control channel. Every RPC except
+// Enroll carries the node secret as "authorization: Bearer <secret>".
 type ControlServer interface {
 	// Enroll registers a new agent peer with a one-time token.
 	Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error)
+	// Sync streams the caller's netmap: a full map on connect, a full map
+	// on every change affecting the caller, and a keepalive map every 30 s.
+	Sync(*SyncRequest, grpc.ServerStreamingServer[NetMap]) error
+	// ReportEndpoints replaces the caller's endpoint candidates.
+	ReportEndpoints(context.Context, *EndpointReport) (*Empty, error)
+	// ReportPath records the caller's path state per peer for status.
+	ReportPath(context.Context, *PathReport) (*Empty, error)
+	// RotateKey replaces the caller's WireGuard public key.
+	RotateKey(context.Context, *RotateKeyRequest) (*RotateKeyResponse, error)
+	// Leave removes the caller from the network.
+	Leave(context.Context, *Empty) (*Empty, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -74,6 +158,21 @@ type UnimplementedControlServer struct{}
 
 func (UnimplementedControlServer) Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Enroll not implemented")
+}
+func (UnimplementedControlServer) Sync(*SyncRequest, grpc.ServerStreamingServer[NetMap]) error {
+	return status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedControlServer) ReportEndpoints(context.Context, *EndpointReport) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportEndpoints not implemented")
+}
+func (UnimplementedControlServer) ReportPath(context.Context, *PathReport) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportPath not implemented")
+}
+func (UnimplementedControlServer) RotateKey(context.Context, *RotateKeyRequest) (*RotateKeyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RotateKey not implemented")
+}
+func (UnimplementedControlServer) Leave(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Leave not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -114,6 +213,89 @@ func _Control_Enroll_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_Sync_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SyncRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ControlServer).Sync(m, &grpc.GenericServerStream[SyncRequest, NetMap]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_SyncServer = grpc.ServerStreamingServer[NetMap]
+
+func _Control_ReportEndpoints_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EndpointReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ReportEndpoints(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ReportEndpoints_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ReportEndpoints(ctx, req.(*EndpointReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_ReportPath_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PathReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ReportPath(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ReportPath_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ReportPath(ctx, req.(*PathReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_RotateKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RotateKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).RotateKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_RotateKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).RotateKey(ctx, req.(*RotateKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_Leave_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).Leave(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_Leave_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).Leave(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -125,7 +307,29 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Enroll",
 			Handler:    _Control_Enroll_Handler,
 		},
+		{
+			MethodName: "ReportEndpoints",
+			Handler:    _Control_ReportEndpoints_Handler,
+		},
+		{
+			MethodName: "ReportPath",
+			Handler:    _Control_ReportPath_Handler,
+		},
+		{
+			MethodName: "RotateKey",
+			Handler:    _Control_RotateKey_Handler,
+		},
+		{
+			MethodName: "Leave",
+			Handler:    _Control_Leave_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Sync",
+			Handler:       _Control_Sync_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "thawr/v1/control.proto",
 }

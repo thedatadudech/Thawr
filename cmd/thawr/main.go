@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,7 +14,7 @@ import (
 var version = "dev"
 
 func main() {
-	if err := newRootCmd(os.Stdout, os.Stderr).Execute(); err != nil {
+	if err := newRootCmd(os.Stdout, os.Stderr).ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "thawr:", err)
 		var ee *exitError
 		if errors.As(err, &ee) {

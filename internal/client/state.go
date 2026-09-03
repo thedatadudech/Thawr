@@ -41,6 +41,8 @@ type State struct {
 	HubPublicKey string    `json:"hub_public_key"`
 	HubEndpoint  string    `json:"hub_endpoint"`
 	EnrolledAt   time.Time `json:"enrolled_at"`
+	// ListenPort is chosen once so endpoint candidates stay stable.
+	ListenPort int `json:"listen_port,omitempty"`
 }
 
 // DefaultDir returns the platform's state directory unless THAWR_STATE_DIR

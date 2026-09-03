@@ -5,19 +5,40 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/thedatadudech/thawr/internal/store"
 )
 
 // Registry lists and manages registered peers.
 type Registry struct {
-	store *store.Store
-	log   *slog.Logger
+	store  *store.Store
+	log    *slog.Logger
+	now    func() time.Time
+	notify Notifier
 }
 
-// NewRegistry builds the registry service.
+// NewRegistry builds the registry service. notify may be nil.
 func NewRegistry(st *store.Store, log *slog.Logger) *Registry {
-	return &Registry{store: st, log: log}
+	return &Registry{store: st, log: log, now: time.Now}
+}
+
+// WithNotifier sets the notifier told after every persistent change.
+func (r *Registry) WithNotifier(n Notifier) *Registry {
+	r.notify = n
+	return r
+}
+
+// WithClock sets the time source.
+func (r *Registry) WithClock(now func() time.Time) *Registry {
+	r.now = now
+	return r
+}
+
+func (r *Registry) changed() {
+	if r.notify != nil {
+		r.notify.Changed()
+	}
 }
 
 // List returns peers visible to the principal: all for admins, own for
@@ -73,6 +94,7 @@ func (r *Registry) Rename(ctx context.Context, by Principal, name, newName strin
 	if err != nil {
 		return err
 	}
+	r.changed()
 	r.log.Info("peer renamed", "peer_id", p.ID, "from", name, "to", newName, "by", by.Name)
 	return nil
 }
@@ -87,8 +109,16 @@ func (r *Registry) Delete(ctx context.Context, by Principal, name string) error 
 	if err != nil {
 		return err
 	}
-	err = r.store.InTx(ctx, func(tx *store.Store) error {
-		if err := tx.Peers().Delete(ctx, p.ID); err != nil {
+	if err := r.deletePeer(ctx, p.ID); err != nil {
+		return err
+	}
+	r.log.Info("peer deleted", "peer", name, "peer_id", p.ID, "by", by.Name)
+	return nil
+}
+
+func (r *Registry) deletePeer(ctx context.Context, id string) error {
+	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.Peers().Delete(ctx, id); err != nil {
 			return err
 		}
 		_, err := tx.Meta().IncrementGeneration(ctx)
@@ -97,8 +127,66 @@ func (r *Registry) Delete(ctx context.Context, by Principal, name string) error 
 	if err != nil {
 		return err
 	}
-	r.log.Info("peer deleted", "peer", name, "peer_id", p.ID, "by", by.Name)
+	r.changed()
 	return nil
+}
+
+// PeerByNodeSecret authenticates an agent peer by its node secret.
+func (r *Registry) PeerByNodeSecret(ctx context.Context, secret string) (store.Peer, error) {
+	if secret == "" {
+		return store.Peer{}, ErrForbidden
+	}
+	p, err := r.store.Peers().GetByNodeSecretHash(ctx, hashSecret(secret))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Peer{}, ErrForbidden
+	}
+	return p, err
+}
+
+// RotateKey replaces a peer's WireGuard public key and bumps the
+// generation so every client switches within one netmap.
+func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error) {
+	if _, err := parsePublicKey(newPublicKey); err != nil {
+		return 0, err
+	}
+	var gen int64
+	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.Peers().SetPublicKey(ctx, peerID, newPublicKey); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				return fmt.Errorf("%w: key already in use", ErrValidation)
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
+			}
+			return err
+		}
+		var err error
+		gen, err = tx.Meta().IncrementGeneration(ctx)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	r.changed()
+	r.log.Info("peer key rotated", "peer_id", peerID, "generation", gen)
+	return gen, nil
+}
+
+// Leave removes a peer at its own request.
+func (r *Registry) Leave(ctx context.Context, peerID string) error {
+	if err := r.deletePeer(ctx, peerID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
+		}
+		return err
+	}
+	r.log.Info("peer left", "peer_id", peerID)
+	return nil
+}
+
+// Touch records that a peer was seen now.
+func (r *Registry) Touch(ctx context.Context, peerID string) error {
+	return r.store.Peers().Touch(ctx, peerID, r.now())
 }
 
 // Generation returns the current netmap generation.

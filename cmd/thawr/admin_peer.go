@@ -16,6 +16,7 @@ type peerJSON struct {
 	Tags       []string `json:"tags"`
 	PublicKey  string   `json:"public_key"`
 	IPv4       string   `json:"ipv4"`
+	Online     bool     `json:"online"`
 	CreatedAt  string   `json:"created_at"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
 }
@@ -36,9 +37,13 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			}
 			rows := make([][]string, 0, len(peers))
 			for _, p := range peers {
-				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), p.CreatedAt})
+				online := "offline"
+				if p.Online {
+					online = "online"
+				}
+				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), online, p.CreatedAt})
 			}
-			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "CREATED"}, rows)
+			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "STATE", "CREATED"}, rows)
 		},
 	}
 	rename := &cobra.Command{

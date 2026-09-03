@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,6 +23,27 @@ type Enroller interface {
 	Enroll(ctx context.Context, req control.EnrollRequest) (control.EnrollResult, error)
 }
 
+// NetMapSource builds per-peer netmaps.
+type NetMapSource interface {
+	Build(ctx context.Context, peerID string) (control.NetMap, error)
+}
+
+// SyncHub is what the streaming RPCs need from control.Hub.
+type SyncHub interface {
+	Subscribe(peerID string) (<-chan struct{}, func())
+	Connected(peerID string)
+	Disconnected(peerID string)
+	Changed()
+	Options() control.HubOptions
+}
+
+// PeerOps are the per-peer operations behind the authenticated RPCs.
+type PeerOps interface {
+	RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error)
+	Leave(ctx context.Context, peerID string) error
+	Touch(ctx context.Context, peerID string) error
+}
+
 // HubInfo describes the server's own WireGuard endpoint as advertised
 // to peers.
 type HubInfo struct {
@@ -30,12 +52,20 @@ type HubInfo struct {
 	Overlay   netip.Prefix
 }
 
-// GRPCDeps are the collaborators of the Control service.
+// GRPCDeps are the collaborators of the Control service. Enroller and
+// Hub info are required; the rest may be nil for enroll-only tests, in
+// which case the other RPCs answer Unimplemented.
 type GRPCDeps struct {
-	Enroller Enroller
-	Hub      HubInfo
-	Version  string
-	Logger   *slog.Logger
+	Enroller  Enroller
+	Hub       HubInfo
+	Version   string
+	Logger    *slog.Logger
+	NodeAuth  NodeAuth
+	NetMaps   NetMapSource
+	Sync      SyncHub
+	Peers     PeerOps
+	Endpoints *control.EndpointTable
+	Paths     *control.PathTable
 }
 
 // NewGRPC builds the gRPC server with the Control service registered.
@@ -47,7 +77,11 @@ func NewGRPC(deps GRPCDeps) (*grpc.Server, error) {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
-	srv := grpc.NewServer()
+	var opts []grpc.ServerOption
+	if deps.NodeAuth != nil {
+		opts = append(opts, grpc.ChainUnaryInterceptor(unaryAuth(deps.NodeAuth)), grpc.ChainStreamInterceptor(streamAuth(deps.NodeAuth)))
+	}
+	srv := grpc.NewServer(opts...)
 	thawrv1.RegisterControlServer(srv, &controlServer{deps: deps})
 	return srv, nil
 }
@@ -84,6 +118,151 @@ func (s *controlServer) Enroll(ctx context.Context, req *thawrv1.EnrollRequest) 
 	}, nil
 }
 
+// Sync streams the caller's netmap: a full map now, a full map on every
+// change, and a keepalive copy every KeepaliveInterval.
+func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreamingServer[thawrv1.NetMap]) error {
+	if s.deps.NetMaps == nil || s.deps.Sync == nil {
+		return status.Error(codes.Unimplemented, "sync not available")
+	}
+	ctx := stream.Context()
+	me, ok := peerFromContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "node secret required")
+	}
+	log := s.deps.Logger.With("peer", me.Name, "peer_id", me.ID)
+	log.Info("sync connected", "client_generation", req.GetGeneration(), "client_version", req.GetClientVersion(), "remote", remoteIP(ctx))
+
+	wake, unsubscribe := s.deps.Sync.Subscribe(me.ID)
+	defer unsubscribe()
+	s.deps.Sync.Connected(me.ID)
+	defer s.deps.Sync.Disconnected(me.ID)
+	if s.deps.Peers != nil {
+		if err := s.deps.Peers.Touch(ctx, me.ID); err != nil {
+			log.Warn("touch failed", "err", err)
+		}
+	}
+
+	keepalive := time.NewTicker(s.deps.Sync.Options().KeepaliveInterval)
+	defer keepalive.Stop()
+	send := func(isKeepalive bool) error {
+		nm, err := s.deps.NetMaps.Build(ctx, me.ID)
+		if errors.Is(err, control.ErrNotFound) {
+			log.Info("sync closed: peer removed")
+			return status.Error(codes.PermissionDenied, "peer removed")
+		}
+		if err != nil {
+			log.Error("build netmap", "err", err)
+			return status.Error(codes.Internal, "internal error")
+		}
+		msg := netMapToProto(nm)
+		msg.Keepalive = isKeepalive
+		if err := stream.Send(msg); err != nil {
+			return err
+		}
+		if !isKeepalive {
+			log.Debug("netmap sent", "generation", nm.Generation, "peers", len(nm.Peers))
+		}
+		return nil
+	}
+	if err := send(false); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("sync disconnected")
+			return nil
+		case <-wake:
+			if err := send(false); err != nil {
+				return err
+			}
+		case <-keepalive.C:
+			if err := send(true); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *controlServer) ReportEndpoints(ctx context.Context, req *thawrv1.EndpointReport) (*thawrv1.Empty, error) {
+	if s.deps.Endpoints == nil || s.deps.Sync == nil {
+		return nil, status.Error(codes.Unimplemented, "endpoint reports not available")
+	}
+	me, ok := peerFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "node secret required")
+	}
+	eps, err := endpointsFromProto(req.GetEndpoints())
+	if err != nil {
+		return nil, s.toStatus(err)
+	}
+	if req.GetListenPort() > 65535 {
+		return nil, status.Error(codes.InvalidArgument, "listen_port out of range")
+	}
+	changed, err := s.deps.Endpoints.Set(me.ID, eps, req.GetSymmetric(), uint16(req.GetListenPort())) //nolint:gosec // range-checked above
+	if err != nil {
+		return nil, s.toStatus(err)
+	}
+	if changed {
+		s.deps.Logger.Debug("endpoints updated", "peer", me.Name, "count", len(eps), "symmetric", req.GetSymmetric())
+		s.deps.Sync.Changed()
+	}
+	return &thawrv1.Empty{}, nil
+}
+
+func (s *controlServer) ReportPath(ctx context.Context, req *thawrv1.PathReport) (*thawrv1.Empty, error) {
+	if s.deps.Paths == nil {
+		return nil, status.Error(codes.Unimplemented, "path reports not available")
+	}
+	me, ok := peerFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "node secret required")
+	}
+	if len(req.GetPaths()) > 4096 {
+		return nil, status.Error(codes.InvalidArgument, "too many paths")
+	}
+	paths := make([]control.PathState, 0, len(req.GetPaths()))
+	for _, p := range req.GetPaths() {
+		switch p.GetState() {
+		case "direct", "relay", "probing", "idle", "unreachable", "hub":
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "unknown path state %q", p.GetState())
+		}
+		paths = append(paths, control.PathState{PeerID: p.GetPeerId(), State: p.GetState(), Endpoint: p.GetEndpoint()})
+	}
+	s.deps.Paths.Set(me.ID, paths)
+	return &thawrv1.Empty{}, nil
+}
+
+func (s *controlServer) RotateKey(ctx context.Context, req *thawrv1.RotateKeyRequest) (*thawrv1.RotateKeyResponse, error) {
+	if s.deps.Peers == nil {
+		return nil, status.Error(codes.Unimplemented, "key rotation not available")
+	}
+	me, ok := peerFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "node secret required")
+	}
+	gen, err := s.deps.Peers.RotateKey(ctx, me.ID, req.GetNewPublicKey())
+	if err != nil {
+		return nil, s.toStatus(err)
+	}
+	return &thawrv1.RotateKeyResponse{Generation: gen}, nil
+}
+
+func (s *controlServer) Leave(ctx context.Context, _ *thawrv1.Empty) (*thawrv1.Empty, error) {
+	if s.deps.Peers == nil {
+		return nil, status.Error(codes.Unimplemented, "leave not available")
+	}
+	me, ok := peerFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "node secret required")
+	}
+	if err := s.deps.Peers.Leave(ctx, me.ID); err != nil {
+		return nil, s.toStatus(err)
+	}
+	return &thawrv1.Empty{}, nil
+}
+
 // toStatus maps control errors to gRPC codes without leaking internals.
 func (s *controlServer) toStatus(err error) error {
 	switch {
@@ -97,8 +276,12 @@ func (s *controlServer) toStatus(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, control.ErrExhausted):
 		return status.Error(codes.ResourceExhausted, "no free overlay address")
+	case errors.Is(err, control.ErrNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, control.ErrForbidden):
+		return status.Error(codes.PermissionDenied, err.Error())
 	}
-	s.deps.Logger.Error("enroll failed", "err", err)
+	s.deps.Logger.Error("rpc failed", "err", err)
 	return status.Error(codes.Internal, "internal error")
 }
 

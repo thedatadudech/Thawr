@@ -21,6 +21,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// EndpointKind classifies a candidate address.
+type EndpointKind int32
+
+const (
+	EndpointKind_ENDPOINT_KIND_UNSPECIFIED EndpointKind = 0
+	EndpointKind_ENDPOINT_KIND_LOCAL       EndpointKind = 1
+	EndpointKind_ENDPOINT_KIND_REFLEXIVE   EndpointKind = 2
+	EndpointKind_ENDPOINT_KIND_STABLE      EndpointKind = 3
+)
+
+// Enum value maps for EndpointKind.
+var (
+	EndpointKind_name = map[int32]string{
+		0: "ENDPOINT_KIND_UNSPECIFIED",
+		1: "ENDPOINT_KIND_LOCAL",
+		2: "ENDPOINT_KIND_REFLEXIVE",
+		3: "ENDPOINT_KIND_STABLE",
+	}
+	EndpointKind_value = map[string]int32{
+		"ENDPOINT_KIND_UNSPECIFIED": 0,
+		"ENDPOINT_KIND_LOCAL":       1,
+		"ENDPOINT_KIND_REFLEXIVE":   2,
+		"ENDPOINT_KIND_STABLE":      3,
+	}
+)
+
+func (x EndpointKind) Enum() *EndpointKind {
+	p := new(EndpointKind)
+	*p = x
+	return p
+}
+
+func (x EndpointKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EndpointKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_thawr_v1_control_proto_enumTypes[0].Descriptor()
+}
+
+func (EndpointKind) Type() protoreflect.EnumType {
+	return &file_thawr_v1_control_proto_enumTypes[0]
+}
+
+func (x EndpointKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EndpointKind.Descriptor instead.
+func (EndpointKind) EnumDescriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{0}
+}
+
 // EnrollRequest carries the token and the client's identity.
 type EnrollRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -227,6 +280,814 @@ func (x *EnrollResponse) GetNetmapGeneration() int64 {
 	return 0
 }
 
+// SyncRequest opens the netmap stream. generation is informational: the
+// server always sends a full map first.
+type SyncRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Generation    int64                  `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	ClientVersion string                 `protobuf:"bytes,2,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncRequest) Reset() {
+	*x = SyncRequest{}
+	mi := &file_thawr_v1_control_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncRequest) ProtoMessage() {}
+
+func (x *SyncRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
+func (*SyncRequest) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SyncRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *SyncRequest) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
+// NetMap is one peer's complete view of the network.
+type NetMap struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Generation int64                  `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	Self       *SelfInfo              `protobuf:"bytes,2,opt,name=self,proto3" json:"self,omitempty"`
+	Peers      []*NetPeer             `protobuf:"bytes,3,rep,name=peers,proto3" json:"peers,omitempty"`
+	Hub        *HubPeer               `protobuf:"bytes,4,opt,name=hub,proto3" json:"hub,omitempty"`
+	Filter     []*FilterRule          `protobuf:"bytes,5,rep,name=filter,proto3" json:"filter,omitempty"`
+	// keepalive marks a periodic resend with no change.
+	Keepalive     bool `protobuf:"varint,6,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetMap) Reset() {
+	*x = NetMap{}
+	mi := &file_thawr_v1_control_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetMap) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetMap) ProtoMessage() {}
+
+func (x *NetMap) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetMap.ProtoReflect.Descriptor instead.
+func (*NetMap) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *NetMap) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *NetMap) GetSelf() *SelfInfo {
+	if x != nil {
+		return x.Self
+	}
+	return nil
+}
+
+func (x *NetMap) GetPeers() []*NetPeer {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+func (x *NetMap) GetHub() *HubPeer {
+	if x != nil {
+		return x.Hub
+	}
+	return nil
+}
+
+func (x *NetMap) GetFilter() []*FilterRule {
+	if x != nil {
+		return x.Filter
+	}
+	return nil
+}
+
+func (x *NetMap) GetKeepalive() bool {
+	if x != nil {
+		return x.Keepalive
+	}
+	return false
+}
+
+// SelfInfo describes the receiving peer.
+type SelfInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Ipv4          string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	OverlayCidr   string                 `protobuf:"bytes,4,opt,name=overlay_cidr,json=overlayCidr,proto3" json:"overlay_cidr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelfInfo) Reset() {
+	*x = SelfInfo{}
+	mi := &file_thawr_v1_control_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelfInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelfInfo) ProtoMessage() {}
+
+func (x *SelfInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelfInfo.ProtoReflect.Descriptor instead.
+func (*SelfInfo) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SelfInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SelfInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SelfInfo) GetIpv4() string {
+	if x != nil {
+		return x.Ipv4
+	}
+	return ""
+}
+
+func (x *SelfInfo) GetOverlayCidr() string {
+	if x != nil {
+		return x.OverlayCidr
+	}
+	return ""
+}
+
+// NetPeer is one visible peer.
+type NetPeer struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Kind      string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	PublicKey string                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Ipv4      string                 `protobuf:"bytes,5,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Online    bool                   `protobuf:"varint,6,opt,name=online,proto3" json:"online,omitempty"`
+	Endpoints []*Endpoint            `protobuf:"bytes,7,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	Symmetric bool                   `protobuf:"varint,8,opt,name=symmetric,proto3" json:"symmetric,omitempty"`
+	// keepalive asks the receiver to send persistent keepalives to this peer.
+	Keepalive bool `protobuf:"varint,9,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	// allowed_ips lists extra prefixes routed to this peer besides its /32.
+	AllowedIps    []string `protobuf:"bytes,10,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetPeer) Reset() {
+	*x = NetPeer{}
+	mi := &file_thawr_v1_control_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetPeer) ProtoMessage() {}
+
+func (x *NetPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetPeer.ProtoReflect.Descriptor instead.
+func (*NetPeer) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NetPeer) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *NetPeer) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NetPeer) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *NetPeer) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *NetPeer) GetIpv4() string {
+	if x != nil {
+		return x.Ipv4
+	}
+	return ""
+}
+
+func (x *NetPeer) GetOnline() bool {
+	if x != nil {
+		return x.Online
+	}
+	return false
+}
+
+func (x *NetPeer) GetEndpoints() []*Endpoint {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
+func (x *NetPeer) GetSymmetric() bool {
+	if x != nil {
+		return x.Symmetric
+	}
+	return false
+}
+
+func (x *NetPeer) GetKeepalive() bool {
+	if x != nil {
+		return x.Keepalive
+	}
+	return false
+}
+
+func (x *NetPeer) GetAllowedIps() []string {
+	if x != nil {
+		return x.AllowedIps
+	}
+	return nil
+}
+
+// Endpoint is one ip:port candidate.
+type Endpoint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Addr          string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	Kind          EndpointKind           `protobuf:"varint,2,opt,name=kind,proto3,enum=thawr.v1.EndpointKind" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Endpoint) Reset() {
+	*x = Endpoint{}
+	mi := &file_thawr_v1_control_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Endpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Endpoint) ProtoMessage() {}
+
+func (x *Endpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Endpoint.ProtoReflect.Descriptor instead.
+func (*Endpoint) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Endpoint) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Endpoint) GetKind() EndpointKind {
+	if x != nil {
+		return x.Kind
+	}
+	return EndpointKind_ENDPOINT_KIND_UNSPECIFIED
+}
+
+// HubPeer is the server's own WireGuard interface as seen by a peer.
+type HubPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PublicKey     string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Endpoint      string                 `protobuf:"bytes,2,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	AllowedIps    []string               `protobuf:"bytes,3,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HubPeer) Reset() {
+	*x = HubPeer{}
+	mi := &file_thawr_v1_control_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HubPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HubPeer) ProtoMessage() {}
+
+func (x *HubPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HubPeer.ProtoReflect.Descriptor instead.
+func (*HubPeer) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HubPeer) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *HubPeer) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *HubPeer) GetAllowedIps() []string {
+	if x != nil {
+		return x.AllowedIps
+	}
+	return nil
+}
+
+// FilterRule allows src_ipv4 to reach the receiver on a port range.
+// Empty filter means allow everything from visible peers (until spec 006).
+type FilterRule struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SrcIpv4       string                 `protobuf:"bytes,1,opt,name=src_ipv4,json=srcIpv4,proto3" json:"src_ipv4,omitempty"`
+	Proto         string                 `protobuf:"bytes,2,opt,name=proto,proto3" json:"proto,omitempty"`
+	PortLo        uint32                 `protobuf:"varint,3,opt,name=port_lo,json=portLo,proto3" json:"port_lo,omitempty"`
+	PortHi        uint32                 `protobuf:"varint,4,opt,name=port_hi,json=portHi,proto3" json:"port_hi,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FilterRule) Reset() {
+	*x = FilterRule{}
+	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FilterRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FilterRule) ProtoMessage() {}
+
+func (x *FilterRule) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FilterRule.ProtoReflect.Descriptor instead.
+func (*FilterRule) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *FilterRule) GetSrcIpv4() string {
+	if x != nil {
+		return x.SrcIpv4
+	}
+	return ""
+}
+
+func (x *FilterRule) GetProto() string {
+	if x != nil {
+		return x.Proto
+	}
+	return ""
+}
+
+func (x *FilterRule) GetPortLo() uint32 {
+	if x != nil {
+		return x.PortLo
+	}
+	return 0
+}
+
+func (x *FilterRule) GetPortHi() uint32 {
+	if x != nil {
+		return x.PortHi
+	}
+	return 0
+}
+
+// EndpointReport replaces the caller's candidates.
+type EndpointReport struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Endpoints     []*Endpoint            `protobuf:"bytes,1,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	Symmetric     bool                   `protobuf:"varint,2,opt,name=symmetric,proto3" json:"symmetric,omitempty"`
+	ListenPort    uint32                 `protobuf:"varint,3,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointReport) Reset() {
+	*x = EndpointReport{}
+	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointReport) ProtoMessage() {}
+
+func (x *EndpointReport) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointReport.ProtoReflect.Descriptor instead.
+func (*EndpointReport) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *EndpointReport) GetEndpoints() []*Endpoint {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
+func (x *EndpointReport) GetSymmetric() bool {
+	if x != nil {
+		return x.Symmetric
+	}
+	return false
+}
+
+func (x *EndpointReport) GetListenPort() uint32 {
+	if x != nil {
+		return x.ListenPort
+	}
+	return 0
+}
+
+// PathReport records how the caller currently reaches each peer.
+type PathReport struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Paths         []*PathState           `protobuf:"bytes,1,rep,name=paths,proto3" json:"paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PathReport) Reset() {
+	*x = PathReport{}
+	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PathReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PathReport) ProtoMessage() {}
+
+func (x *PathReport) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PathReport.ProtoReflect.Descriptor instead.
+func (*PathReport) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *PathReport) GetPaths() []*PathState {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+// PathState is one peer's path from the caller's view.
+type PathState struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	PeerId string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	// state is direct, relay, probing, idle, unreachable or hub.
+	State         string `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Endpoint      string `protobuf:"bytes,3,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PathState) Reset() {
+	*x = PathState{}
+	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PathState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PathState) ProtoMessage() {}
+
+func (x *PathState) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PathState.ProtoReflect.Descriptor instead.
+func (*PathState) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *PathState) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *PathState) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *PathState) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+// RotateKeyRequest carries the new public key; the old one stays valid
+// until the next netmap is delivered.
+type RotateKeyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NewPublicKey  string                 `protobuf:"bytes,1,opt,name=new_public_key,json=newPublicKey,proto3" json:"new_public_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RotateKeyRequest) Reset() {
+	*x = RotateKeyRequest{}
+	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RotateKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RotateKeyRequest) ProtoMessage() {}
+
+func (x *RotateKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RotateKeyRequest.ProtoReflect.Descriptor instead.
+func (*RotateKeyRequest) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RotateKeyRequest) GetNewPublicKey() string {
+	if x != nil {
+		return x.NewPublicKey
+	}
+	return ""
+}
+
+// RotateKeyResponse reports the generation carrying the new key.
+type RotateKeyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Generation    int64                  `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RotateKeyResponse) Reset() {
+	*x = RotateKeyResponse{}
+	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RotateKeyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RotateKeyResponse) ProtoMessage() {}
+
+func (x *RotateKeyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RotateKeyResponse.ProtoReflect.Descriptor instead.
+func (*RotateKeyResponse) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RotateKeyResponse) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+// Empty is the empty message.
+type Empty struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Empty) Reset() {
+	*x = Empty{}
+	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Empty) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Empty) ProtoMessage() {}
+
+func (x *Empty) ProtoReflect() protoreflect.Message {
+	mi := &file_thawr_v1_control_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Empty.ProtoReflect.Descriptor instead.
+func (*Empty) Descriptor() ([]byte, []int) {
+	return file_thawr_v1_control_proto_rawDescGZIP(), []int{14}
+}
+
 var File_thawr_v1_control_proto protoreflect.FileDescriptor
 
 const file_thawr_v1_control_proto_rawDesc = "" +
@@ -251,9 +1112,87 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x0ehub_public_key\x18\x06 \x01(\tR\fhubPublicKey\x12!\n" +
 	"\fhub_endpoint\x18\a \x01(\tR\vhubEndpoint\x12%\n" +
 	"\x0eserver_version\x18\b \x01(\tR\rserverVersion\x12+\n" +
-	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration2F\n" +
+	"\x11netmap_generation\x18\t \x01(\x03R\x10netmapGeneration\"T\n" +
+	"\vSyncRequest\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x03R\n" +
+	"generation\x12%\n" +
+	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\"\xea\x01\n" +
+	"\x06NetMap\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x03R\n" +
+	"generation\x12&\n" +
+	"\x04self\x18\x02 \x01(\v2\x12.thawr.v1.SelfInfoR\x04self\x12'\n" +
+	"\x05peers\x18\x03 \x03(\v2\x11.thawr.v1.NetPeerR\x05peers\x12#\n" +
+	"\x03hub\x18\x04 \x01(\v2\x11.thawr.v1.HubPeerR\x03hub\x12,\n" +
+	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
+	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"e\n" +
+	"\bSelfInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04ipv4\x18\x03 \x01(\tR\x04ipv4\x12!\n" +
+	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\"\x9b\x02\n" +
+	"\aNetPeer\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x04 \x01(\tR\tpublicKey\x12\x12\n" +
+	"\x04ipv4\x18\x05 \x01(\tR\x04ipv4\x12\x16\n" +
+	"\x06online\x18\x06 \x01(\bR\x06online\x120\n" +
+	"\tendpoints\x18\a \x03(\v2\x12.thawr.v1.EndpointR\tendpoints\x12\x1c\n" +
+	"\tsymmetric\x18\b \x01(\bR\tsymmetric\x12\x1c\n" +
+	"\tkeepalive\x18\t \x01(\bR\tkeepalive\x12\x1f\n" +
+	"\vallowed_ips\x18\n" +
+	" \x03(\tR\n" +
+	"allowedIps\"J\n" +
+	"\bEndpoint\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"e\n" +
+	"\aHubPeer\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1a\n" +
+	"\bendpoint\x18\x02 \x01(\tR\bendpoint\x12\x1f\n" +
+	"\vallowed_ips\x18\x03 \x03(\tR\n" +
+	"allowedIps\"o\n" +
+	"\n" +
+	"FilterRule\x12\x19\n" +
+	"\bsrc_ipv4\x18\x01 \x01(\tR\asrcIpv4\x12\x14\n" +
+	"\x05proto\x18\x02 \x01(\tR\x05proto\x12\x17\n" +
+	"\aport_lo\x18\x03 \x01(\rR\x06portLo\x12\x17\n" +
+	"\aport_hi\x18\x04 \x01(\rR\x06portHi\"\x81\x01\n" +
+	"\x0eEndpointReport\x120\n" +
+	"\tendpoints\x18\x01 \x03(\v2\x12.thawr.v1.EndpointR\tendpoints\x12\x1c\n" +
+	"\tsymmetric\x18\x02 \x01(\bR\tsymmetric\x12\x1f\n" +
+	"\vlisten_port\x18\x03 \x01(\rR\n" +
+	"listenPort\"7\n" +
+	"\n" +
+	"PathReport\x12)\n" +
+	"\x05paths\x18\x01 \x03(\v2\x13.thawr.v1.PathStateR\x05paths\"V\n" +
+	"\tPathState\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1a\n" +
+	"\bendpoint\x18\x03 \x01(\tR\bendpoint\"8\n" +
+	"\x10RotateKeyRequest\x12$\n" +
+	"\x0enew_public_key\x18\x01 \x01(\tR\fnewPublicKey\"3\n" +
+	"\x11RotateKeyResponse\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\x03R\n" +
+	"generation\"\a\n" +
+	"\x05Empty*}\n" +
+	"\fEndpointKind\x12\x1d\n" +
+	"\x19ENDPOINT_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13ENDPOINT_KIND_LOCAL\x10\x01\x12\x1b\n" +
+	"\x17ENDPOINT_KIND_REFLEXIVE\x10\x02\x12\x18\n" +
+	"\x14ENDPOINT_KIND_STABLE\x10\x032\xdd\x02\n" +
 	"\aControl\x12;\n" +
-	"\x06Enroll\x12\x17.thawr.v1.EnrollRequest\x1a\x18.thawr.v1.EnrollResponseBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
+	"\x06Enroll\x12\x17.thawr.v1.EnrollRequest\x1a\x18.thawr.v1.EnrollResponse\x121\n" +
+	"\x04Sync\x12\x15.thawr.v1.SyncRequest\x1a\x10.thawr.v1.NetMap0\x01\x12<\n" +
+	"\x0fReportEndpoints\x12\x18.thawr.v1.EndpointReport\x1a\x0f.thawr.v1.Empty\x123\n" +
+	"\n" +
+	"ReportPath\x12\x14.thawr.v1.PathReport\x1a\x0f.thawr.v1.Empty\x12D\n" +
+	"\tRotateKey\x12\x1a.thawr.v1.RotateKeyRequest\x1a\x1b.thawr.v1.RotateKeyResponse\x12)\n" +
+	"\x05Leave\x12\x0f.thawr.v1.Empty\x1a\x0f.thawr.v1.EmptyBDZBgithub.com/thedatadudech/thawr/internal/api/proto/thawr/v1;thawrv1b\x06proto3"
 
 var (
 	file_thawr_v1_control_proto_rawDescOnce sync.Once
@@ -267,19 +1206,52 @@ func file_thawr_v1_control_proto_rawDescGZIP() []byte {
 	return file_thawr_v1_control_proto_rawDescData
 }
 
-var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_thawr_v1_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_thawr_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_thawr_v1_control_proto_goTypes = []any{
-	(*EnrollRequest)(nil),  // 0: thawr.v1.EnrollRequest
-	(*EnrollResponse)(nil), // 1: thawr.v1.EnrollResponse
+	(EndpointKind)(0),         // 0: thawr.v1.EndpointKind
+	(*EnrollRequest)(nil),     // 1: thawr.v1.EnrollRequest
+	(*EnrollResponse)(nil),    // 2: thawr.v1.EnrollResponse
+	(*SyncRequest)(nil),       // 3: thawr.v1.SyncRequest
+	(*NetMap)(nil),            // 4: thawr.v1.NetMap
+	(*SelfInfo)(nil),          // 5: thawr.v1.SelfInfo
+	(*NetPeer)(nil),           // 6: thawr.v1.NetPeer
+	(*Endpoint)(nil),          // 7: thawr.v1.Endpoint
+	(*HubPeer)(nil),           // 8: thawr.v1.HubPeer
+	(*FilterRule)(nil),        // 9: thawr.v1.FilterRule
+	(*EndpointReport)(nil),    // 10: thawr.v1.EndpointReport
+	(*PathReport)(nil),        // 11: thawr.v1.PathReport
+	(*PathState)(nil),         // 12: thawr.v1.PathState
+	(*RotateKeyRequest)(nil),  // 13: thawr.v1.RotateKeyRequest
+	(*RotateKeyResponse)(nil), // 14: thawr.v1.RotateKeyResponse
+	(*Empty)(nil),             // 15: thawr.v1.Empty
 }
 var file_thawr_v1_control_proto_depIdxs = []int32{
-	0, // 0: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
-	1, // 1: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	5,  // 0: thawr.v1.NetMap.self:type_name -> thawr.v1.SelfInfo
+	6,  // 1: thawr.v1.NetMap.peers:type_name -> thawr.v1.NetPeer
+	8,  // 2: thawr.v1.NetMap.hub:type_name -> thawr.v1.HubPeer
+	9,  // 3: thawr.v1.NetMap.filter:type_name -> thawr.v1.FilterRule
+	7,  // 4: thawr.v1.NetPeer.endpoints:type_name -> thawr.v1.Endpoint
+	0,  // 5: thawr.v1.Endpoint.kind:type_name -> thawr.v1.EndpointKind
+	7,  // 6: thawr.v1.EndpointReport.endpoints:type_name -> thawr.v1.Endpoint
+	12, // 7: thawr.v1.PathReport.paths:type_name -> thawr.v1.PathState
+	1,  // 8: thawr.v1.Control.Enroll:input_type -> thawr.v1.EnrollRequest
+	3,  // 9: thawr.v1.Control.Sync:input_type -> thawr.v1.SyncRequest
+	10, // 10: thawr.v1.Control.ReportEndpoints:input_type -> thawr.v1.EndpointReport
+	11, // 11: thawr.v1.Control.ReportPath:input_type -> thawr.v1.PathReport
+	13, // 12: thawr.v1.Control.RotateKey:input_type -> thawr.v1.RotateKeyRequest
+	15, // 13: thawr.v1.Control.Leave:input_type -> thawr.v1.Empty
+	2,  // 14: thawr.v1.Control.Enroll:output_type -> thawr.v1.EnrollResponse
+	4,  // 15: thawr.v1.Control.Sync:output_type -> thawr.v1.NetMap
+	15, // 16: thawr.v1.Control.ReportEndpoints:output_type -> thawr.v1.Empty
+	15, // 17: thawr.v1.Control.ReportPath:output_type -> thawr.v1.Empty
+	14, // 18: thawr.v1.Control.RotateKey:output_type -> thawr.v1.RotateKeyResponse
+	15, // 19: thawr.v1.Control.Leave:output_type -> thawr.v1.Empty
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_thawr_v1_control_proto_init() }
@@ -292,13 +1264,14 @@ func file_thawr_v1_control_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_thawr_v1_control_proto_rawDesc), len(file_thawr_v1_control_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_thawr_v1_control_proto_goTypes,
 		DependencyIndexes: file_thawr_v1_control_proto_depIdxs,
+		EnumInfos:         file_thawr_v1_control_proto_enumTypes,
 		MessageInfos:      file_thawr_v1_control_proto_msgTypes,
 	}.Build()
 	File_thawr_v1_control_proto = out.File
