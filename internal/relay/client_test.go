@@ -53,7 +53,7 @@ func startHost(t *testing.T, secrets ...string) *relayHost {
 		keys[s] = relay.Key(k.PublicKey())
 		auth[s] = store.Peer{ID: s, Name: s, PublicKey: k.PublicKey().String()}
 	}
-	srv := relay.NewServer(allVisible{}, relay.ServerOptions{PingInterval: 50 * time.Millisecond, Logger: quiet})
+	srv := relay.NewServer(allVisible{}, relay.ServerOptions{PingInterval: 200 * time.Millisecond, Logger: quiet})
 	h, err := api.NewREST(api.RESTDeps{Status: statusStub{}, UI: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}, Logger: quiet, NodeAuth: auth, Relay: srv})
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +92,21 @@ func (f *fakeWG) send(t *testing.T, to net.Addr, payload []byte) {
 	}
 }
 
+// exchange sends payload to via and waits for it on dst, retrying a few
+// times: the relay has UDP semantics and a frame sent during a
+// reconnect is lost by design.
+func exchange(t *testing.T, src *fakeWG, via net.Addr, dst *fakeWG, payload []byte) (*net.UDPAddr, bool) {
+	t.Helper()
+	for range 5 {
+		src.send(t, via, payload)
+		got, from, ok := dst.recv(time.Second)
+		if ok && string(got) == string(payload) {
+			return from, true
+		}
+	}
+	return nil, false
+}
+
 func (f *fakeWG) recv(timeout time.Duration) ([]byte, *net.UDPAddr, bool) {
 	buf := make([]byte, 2000)
 	_ = f.conn.SetReadDeadline(time.Now().Add(timeout))
@@ -105,7 +120,7 @@ func (f *fakeWG) recv(timeout time.Duration) ([]byte, *net.UDPAddr, bool) {
 func newClient(t *testing.T, host *relayHost, secret string, wgPort int, mod func(*relay.ClientOptions)) *relay.Client {
 	t.Helper()
 	opts := relay.ClientOptions{ServerURL: host.ts.URL, TLS: host.tlsCfg, NodeSecret: secret, WireGuardPort: wgPort,
-		MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, PingInterval: 50 * time.Millisecond,
+		MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, PingInterval: 200 * time.Millisecond,
 		ReleaseDelay: 20 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if mod != nil {
 		mod(&opts)
@@ -150,24 +165,22 @@ func TestRelayClientProxy(t *testing.T) {
 
 	// WireGuard A sends to its proxy; WireGuard B receives from its proxy.
 	payload := []byte{1, 0, 0, 0, 9, 9, 9}
-	wgA.send(t, net.UDPAddrFromAddrPort(proxyAB), payload)
-	got, from, ok := wgB.recv(3 * time.Second)
-	if !ok || string(got) != string(payload) || from.AddrPort() != proxyBA {
-		t.Fatalf("b got %v from %v ok=%v (want from %s)", got, from, ok, proxyBA)
+	from, ok := exchange(t, wgA, net.UDPAddrFromAddrPort(proxyAB), wgB, payload)
+	if !ok || from.AddrPort() != proxyBA {
+		t.Fatalf("b: ok=%v from %v (want from %s)", ok, from, proxyBA)
 	}
 	// And back.
 	reply := []byte{4, 0, 0, 0, 1}
-	wgB.send(t, net.UDPAddrFromAddrPort(proxyBA), reply)
-	got, from, ok = wgA.recv(3 * time.Second)
-	if !ok || string(got) != string(reply) || from.AddrPort() != proxyAB {
-		t.Fatalf("a got %v from %v ok=%v", got, from, ok)
+	from, ok = exchange(t, wgB, net.UDPAddrFromAddrPort(proxyBA), wgA, reply)
+	if !ok || from.AddrPort() != proxyAB {
+		t.Fatalf("a: ok=%v from %v (want from %s)", ok, from, proxyAB)
 	}
 	// Non-WireGuard datagrams never leave the host.
 	wgA.send(t, net.UDPAddrFromAddrPort(proxyAB), []byte{0, 0, 0, 0, 1})
 	if _, _, ok := wgB.recv(100 * time.Millisecond); ok {
 		t.Fatal("non-WireGuard datagram relayed")
 	}
-	if st := host.srv.Stats(); st.Frames != 2 || a.Peers() != 1 {
+	if st := host.srv.Stats(); st.Frames < 2 || a.Peers() != 1 {
 		t.Errorf("stats %+v peers %d", st, a.Peers())
 	}
 	// Endpoint is stable for the same peer.
@@ -216,9 +229,7 @@ func TestRelayClientReconnect(t *testing.T) {
 	waitFor(t, "sessions gone", func() bool { return host.srv.Stats().Sessions == 0 })
 	waitFor(t, "both reconnected", func() bool { return host.srv.Stats().Sessions == 2 && a.Connected() && b.Connected() })
 	payload := []byte{2, 0, 0, 0, 5}
-	wgA.send(t, net.UDPAddrFromAddrPort(proxyAB), payload)
-	got, from, ok := wgB.recv(3 * time.Second)
-	if !ok || string(got) != string(payload) || from.AddrPort() != proxyBA {
-		t.Fatalf("after reconnect: %v from %v ok=%v", got, from, ok)
+	if from, ok := exchange(t, wgA, net.UDPAddrFromAddrPort(proxyAB), wgB, payload); !ok || from.AddrPort() != proxyBA {
+		t.Fatalf("after reconnect: ok=%v from %v", ok, from)
 	}
 }

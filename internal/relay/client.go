@@ -205,7 +205,13 @@ func (c *Client) readProxy(p *proxy) {
 	for {
 		n, _, err := p.conn.ReadFromUDP(buf)
 		if err != nil {
-			return
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			// Windows reports an ICMP unreachable for an earlier send as
+			// a read error; the socket itself is fine.
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 		if n > MaxPayload || !IsWireGuard(buf[:n]) {
 			continue
