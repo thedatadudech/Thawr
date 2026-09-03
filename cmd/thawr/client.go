@@ -1,13 +1,29 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/thedatadudech/thawr/internal/server"
 )
+
+// envClientSocket overrides the client's local control socket.
+const envClientSocket = "THAWR_CLIENT_SOCKET"
+
+func defaultClientSocket() string {
+	if s := os.Getenv(envClientSocket); s != "" {
+		return s
+	}
+	return client.DefaultSocket
+}
 
 func newClientCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -15,52 +31,74 @@ func newClientCmd() *cobra.Command {
 		Short: "Enrol this device and run the node client",
 	}
 	var (
-		server, token, fingerprint, name, stateDir string
-		acceptFingerprint                          bool
+		serverURL, token, fingerprint, name, stateDir, socket, iface, logLevel string
+		acceptFingerprint                                                      bool
 	)
 	up := &cobra.Command{
 		Use:   "up",
-		Short: "Enrol this device with a one-time token",
-		Long: `Enrols this device: generates its WireGuard key, verifies the server
-certificate against --fingerprint, redeems the token and stores the
-result in the state directory. Running the connected daemon is spec 003.`,
+		Short: "Enrol this device if needed, then run the client in the foreground",
+		Long: `Runs the node client: brings up the WireGuard interface, restores the
+cached netmap, and keeps the interface in sync with the server until
+SIGINT or SIGTERM. When the device is not enrolled yet, --server and
+--token enrol it first.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if server == "" || token == "" {
-				return &exitError{code: exitConfigError, err: errors.New("--server and --token are required")}
-			}
-			st, err := client.Enroll(cmd.Context(), client.Options{
-				Server: server, Token: token, Fingerprint: fingerprint, AcceptFingerprint: acceptFingerprint,
-				Name: name, StateDir: stateDir, Version: version,
-			})
-			if err != nil {
-				var fpErr *client.FingerprintError
-				if errors.As(err, &fpErr) {
-					return &exitError{code: exitConfigError, err: err}
+			logger := server.NewLogger(logConfig(logLevel), cmd.ErrOrStderr())
+			if _, err := client.LoadState(stateDir); errors.Is(err, client.ErrNotEnrolled) {
+				if serverURL == "" || token == "" {
+					return &exitError{code: exitConfigError, err: errors.New("not enrolled: --server and --token are required")}
 				}
+				st, err := client.Enroll(cmd.Context(), client.Options{
+					Server: serverURL, Token: token, Fingerprint: fingerprint, AcceptFingerprint: acceptFingerprint,
+					Name: name, StateDir: stateDir, Version: version,
+				})
+				if err != nil {
+					var fpErr *client.FingerprintError
+					if errors.As(err, &fpErr) {
+						return &exitError{code: exitConfigError, err: err}
+					}
+					return err
+				}
+				logger.Info("enrolled", "name", st.Name, "ipv4", st.IPv4, "server", st.Server)
+			} else if err != nil {
+				return err
+			} else if token != "" {
+				logger.Warn("already enrolled; ignoring --token")
+			}
+			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: iface, Logger: logger, Version: version})
+			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "enrolled as %s, %s (server %s)\n", st.Name, st.IPv4, st.Server)
-			return err
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return d.Run(ctx)
 		},
 	}
-	up.Flags().StringVar(&server, "server", "", "server URL, e.g. https://vpn.example.com")
+	up.Flags().StringVar(&serverURL, "server", "", "server URL for enrollment, e.g. https://vpn.example.com")
 	up.Flags().StringVar(&token, "token", "", "one-time enrollment token")
 	up.Flags().StringVar(&fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
 	up.Flags().BoolVar(&acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
 	up.Flags().StringVar(&name, "name", "", "peer name to request instead of the hostname")
-	up.Flags().StringVar(&stateDir, "state-dir", client.DefaultDir(), "state directory ($"+client.EnvStateDir+")")
+	up.Flags().StringVar(&iface, "interface", "thawr0", "WireGuard interface name (macOS: utun)")
+	up.Flags().StringVar(&logLevel, "log-level", "info", "debug, info, warn or error")
+	addClientCommonFlags(up, &stateDir, &socket)
 
 	var forget bool
 	down := &cobra.Command{
 		Use:   "down",
-		Short: "Stop the client; with --forget also remove the enrollment state",
+		Short: "Stop the running client; with --forget also remove the enrollment state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			lc := client.NewLocalClient(socket)
+			if err := lc.Down(cmd.Context()); err != nil {
+				if !forget {
+					return fmt.Errorf("client is not running (%w)", err)
+				}
+			} else {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "client stopping")
+			}
 			if !forget {
-				// TODO(2026-09-03): spec 003 stops the running daemon here.
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "no daemon to stop yet; use --forget to remove the enrollment state")
-				return err
+				return nil
 			}
 			st, err := client.LoadState(stateDir)
 			if errors.Is(err, client.ErrNotEnrolled) {
@@ -73,12 +111,67 @@ result in the state directory. Running the connected daemon is spec 003.`,
 			if err := client.Forget(stateDir); err != nil {
 				return err
 			}
+			_ = os.Remove(stateDirFile(stateDir, client.NetMapFile))
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "forgot enrollment as %s (%s); the server still lists the peer until an admin deletes it\n", st.Name, st.IPv4)
 			return err
 		},
 	}
-	down.Flags().BoolVar(&forget, "forget", false, "remove node.key and state.json")
-	down.Flags().StringVar(&stateDir, "state-dir", client.DefaultDir(), "state directory ($"+client.EnvStateDir+")")
-	cmd.AddCommand(up, down)
+	down.Flags().BoolVar(&forget, "forget", false, "remove node.key, state.json and the netmap cache")
+	addClientCommonFlags(down, &stateDir, &socket)
+
+	var asJSON bool
+	status := &cobra.Command{
+		Use:   "status",
+		Short: "Show the running client's state (JSON; spec 007 adds the table view)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st, err := client.NewLocalClient(socket).Status(cmd.Context())
+			if err != nil {
+				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(st); err != nil {
+				return err
+			}
+			if !st.Connected {
+				return &exitError{code: exitNotConnected, err: errors.New("client is running but not connected to the server")}
+			}
+			return nil
+		},
+	}
+	status.Flags().BoolVar(&asJSON, "json", true, "print JSON (the only format until spec 007)")
+	addClientCommonFlags(status, &stateDir, &socket)
+
+	rotate := &cobra.Command{
+		Use:   "rotate-key",
+		Short: "Generate a new WireGuard key and register it with the server",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := client.NewLocalClient(socket).RotateKey(cmd.Context()); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "key rotated")
+			return err
+		},
+	}
+	addClientCommonFlags(rotate, &stateDir, &socket)
+
+	cmd.AddCommand(up, down, status, rotate)
 	return cmd
 }
+
+func addClientCommonFlags(cmd *cobra.Command, stateDir, socket *string) {
+	cmd.Flags().StringVar(stateDir, "state-dir", client.DefaultDir(), "state directory ($"+client.EnvStateDir+")")
+	cmd.Flags().StringVar(socket, "socket", defaultClientSocket(), "local control socket ($"+envClientSocket+")")
+}
+
+func stateDirFile(dir, name string) string { return dir + string(os.PathSeparator) + name }
+
+// Client exit codes (spec 007).
+const (
+	exitNotConnected = 1
+	exitNotRunning   = 3
+)
+
+func logConfig(level string) config.Log { return config.Log{Level: level, Format: "text"} }

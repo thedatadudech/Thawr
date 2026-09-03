@@ -52,7 +52,7 @@ func TestSubcommandsWithoutActionShowHelp(t *testing.T) {
 func TestClientUpRequiresFlags(t *testing.T) {
 	var out, errOut bytes.Buffer
 	root := newRootCmd(&out, &errOut)
-	root.SetArgs([]string{"client", "up"})
+	root.SetArgs([]string{"client", "up", "--state-dir", t.TempDir()})
 	err := root.Execute()
 	var ee *exitError
 	if !errors.As(err, &ee) || ee.code != exitConfigError {
