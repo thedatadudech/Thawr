@@ -112,7 +112,7 @@ func TestDaemonProbesOnIntent(t *testing.T) {
 		t.Errorf("triggers = %d, want one per candidate", n)
 	}
 	st, _ = lc.Status(context.Background())
-	if st.Peers[0].Path != "direct" || st.Peers[0].PathEndpoint != candLAN1.String() || st.Peers[0].Endpoint != candLAN1.String() {
+	if st.Peers[0].Path != "direct" || st.Peers[0].PathEndpoint != candLAN1.String() || st.Peers[0].Endpoint != candLAN1.String() || st.Peers[0].Probes != 2 || len(st.Peers[0].Candidates) != 3 {
 		t.Errorf("direct status: %+v", st.Peers[0])
 	}
 	waitFor(t, "path report on the server", func() bool {

@@ -48,8 +48,12 @@ type PeerStatus struct {
 	Endpoint  string `json:"endpoint,omitempty"`
 	// Path is idle, probing, direct or unreachable; PathEndpoint is the
 	// address the path uses.
-	Path          string     `json:"path,omitempty"`
-	PathEndpoint  string     `json:"path_endpoint,omitempty"`
+	Path         string `json:"path,omitempty"`
+	PathEndpoint string `json:"path_endpoint,omitempty"`
+	// Probes counts candidates tried since the peer appeared;
+	// Candidates are its addresses as delivered by the server.
+	Probes        int        `json:"probes"`
+	Candidates    []string   `json:"candidates"`
 	LastHandshake *time.Time `json:"last_handshake,omitempty"`
 	RxBytes       uint64     `json:"rx_bytes"`
 	TxBytes       uint64     `json:"tx_bytes"`
@@ -110,10 +114,13 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		st.Hub = hub
 	}
 	for _, p := range nm.Peers {
-		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Online: p.Online, PublicKey: p.PublicKey}
+		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Online: p.Online, PublicKey: p.PublicKey, Candidates: []string{}}
+		for _, e := range p.Endpoints {
+			ps.Candidates = append(ps.Candidates, e.Addr+" ("+e.Kind+")")
+		}
 		fill(&ps)
-		if state, ep, ok := d.pathOf(p.ID); ok {
-			ps.Path = string(state)
+		if state, ep, probes, ok := d.pathOf(p.ID); ok {
+			ps.Path, ps.Probes = string(state), probes
 			if ep.IsValid() {
 				ps.PathEndpoint = ep.String()
 			}

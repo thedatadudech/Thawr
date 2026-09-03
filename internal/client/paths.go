@@ -310,12 +310,12 @@ func (d *Daemon) Ping(ctx context.Context, name string) (PathResult, error) {
 }
 
 // pathOf returns the state of the path to peerID for status.
-func (d *Daemon) pathOf(peerID string) (path.State, netip.AddrPort, bool) {
+func (d *Daemon) pathOf(peerID string) (state path.State, endpoint netip.AddrPort, probes int, ok bool) {
 	d.pmu.Lock()
 	defer d.pmu.Unlock()
 	pp, ok := d.paths[peerID]
 	if !ok {
-		return "", netip.AddrPort{}, false
+		return "", netip.AddrPort{}, 0, false
 	}
-	return pp.state, pp.endpoint, true
+	return pp.state, pp.endpoint, pp.machine.Probes(), true
 }
