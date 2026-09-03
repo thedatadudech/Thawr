@@ -11,28 +11,42 @@ import (
 )
 
 // renderUAPI converts a Config into the wireguard-go IPC "set" format.
-// Peers are replaced wholesale, matching the Configure contract.
-func renderUAPI(cfg Config) string {
+// Listed peers are created or updated in place; keys in remove are
+// deleted. Peers are never replaced wholesale, so unchanged peers keep
+// their sessions.
+func renderUAPI(cfg Config, remove []Key) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "private_key=%s\n", hex.EncodeToString(cfg.PrivateKey[:]))
 	if cfg.ListenPort > 0 {
 		fmt.Fprintf(&b, "listen_port=%d\n", cfg.ListenPort)
 	}
-	b.WriteString("replace_peers=true\n")
+	for _, k := range remove {
+		b.WriteString(renderRemoveUAPI(k))
+	}
 	for _, p := range cfg.Peers {
-		fmt.Fprintf(&b, "public_key=%s\n", hex.EncodeToString(p.PublicKey[:]))
-		if p.Endpoint.IsValid() {
-			fmt.Fprintf(&b, "endpoint=%s\n", p.Endpoint.String())
-		}
-		b.WriteString("replace_allowed_ips=true\n")
-		for _, ip := range p.AllowedIPs {
-			fmt.Fprintf(&b, "allowed_ip=%s\n", ip.String())
-		}
-		if p.Keepalive > 0 {
-			fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", int(p.Keepalive/time.Second))
-		}
+		b.WriteString(renderPeerUAPI(p))
 	}
 	return b.String()
+}
+
+// renderPeerUAPI renders one peer section (create or update).
+func renderPeerUAPI(p Peer) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "public_key=%s\n", hex.EncodeToString(p.PublicKey[:]))
+	if p.Endpoint.IsValid() {
+		fmt.Fprintf(&b, "endpoint=%s\n", p.Endpoint.String())
+	}
+	b.WriteString("replace_allowed_ips=true\n")
+	for _, ip := range p.AllowedIPs {
+		fmt.Fprintf(&b, "allowed_ip=%s\n", ip.String())
+	}
+	fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", int(p.Keepalive/time.Second))
+	return b.String()
+}
+
+// renderRemoveUAPI renders the removal of one peer.
+func renderRemoveUAPI(k Key) string {
+	return fmt.Sprintf("public_key=%s\nremove=true\n", hex.EncodeToString(k[:]))
 }
 
 // parseUAPIStats extracts per-peer statistics from the IPC "get" output.

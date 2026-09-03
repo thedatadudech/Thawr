@@ -56,27 +56,26 @@ func openKernel(_ context.Context, opts Options) (Device, error) {
 }
 
 func (k *kernelDevice) Configure(_ context.Context, cfg Config) error {
-	wcfg := wgtypes.Config{
-		PrivateKey:   &cfg.PrivateKey,
-		ReplacePeers: true,
+	current, err := k.client.Device(k.name)
+	if err != nil {
+		return fmt.Errorf("wg: read %s: %w", k.name, err)
 	}
+	wcfg := wgtypes.Config{PrivateKey: &cfg.PrivateKey}
 	if cfg.ListenPort > 0 {
 		port := cfg.ListenPort
 		wcfg.ListenPort = &port
 	}
+	want := make(map[Key]bool, len(cfg.Peers))
 	for _, p := range cfg.Peers {
-		pc := wgtypes.PeerConfig{PublicKey: p.PublicKey, ReplaceAllowedIPs: true}
-		if p.Endpoint.IsValid() {
-			pc.Endpoint = net.UDPAddrFromAddrPort(p.Endpoint)
+		want[p.PublicKey] = true
+	}
+	for _, p := range current.Peers {
+		if !want[p.PublicKey] {
+			wcfg.Peers = append(wcfg.Peers, wgtypes.PeerConfig{PublicKey: p.PublicKey, Remove: true})
 		}
-		if p.Keepalive > 0 {
-			ka := p.Keepalive
-			pc.PersistentKeepaliveInterval = &ka
-		}
-		for _, ip := range p.AllowedIPs {
-			pc.AllowedIPs = append(pc.AllowedIPs, prefixToIPNet(ip))
-		}
-		wcfg.Peers = append(wcfg.Peers, pc)
+	}
+	for _, p := range cfg.Peers {
+		wcfg.Peers = append(wcfg.Peers, peerConfig(p))
 	}
 	if err := k.client.ConfigureDevice(k.name, wcfg); err != nil {
 		return fmt.Errorf("wg: configure %s: %w", k.name, err)
@@ -85,6 +84,36 @@ func (k *kernelDevice) Configure(_ context.Context, cfg Config) error {
 		return err
 	}
 	return nil
+}
+
+func (k *kernelDevice) SetPeer(_ context.Context, p Peer) error {
+	if err := k.client.ConfigureDevice(k.name, wgtypes.Config{Peers: []wgtypes.PeerConfig{peerConfig(p)}}); err != nil {
+		return fmt.Errorf("wg: set peer %s on %s: %w", Fingerprint(p.PublicKey), k.name, err)
+	}
+	return nil
+}
+
+func (k *kernelDevice) RemovePeer(_ context.Context, key Key) error {
+	cfg := wgtypes.Config{Peers: []wgtypes.PeerConfig{{PublicKey: key, Remove: true}}}
+	if err := k.client.ConfigureDevice(k.name, cfg); err != nil {
+		return fmt.Errorf("wg: remove peer %s on %s: %w", Fingerprint(key), k.name, err)
+	}
+	return nil
+}
+
+// peerConfig renders one peer as a create-or-update with exact allowed
+// IPs; a zero endpoint leaves the kernel's current one untouched.
+func peerConfig(p Peer) wgtypes.PeerConfig {
+	pc := wgtypes.PeerConfig{PublicKey: p.PublicKey, ReplaceAllowedIPs: true}
+	if p.Endpoint.IsValid() {
+		pc.Endpoint = net.UDPAddrFromAddrPort(p.Endpoint)
+	}
+	ka := p.Keepalive
+	pc.PersistentKeepaliveInterval = &ka
+	for _, ip := range p.AllowedIPs {
+		pc.AllowedIPs = append(pc.AllowedIPs, prefixToIPNet(ip))
+	}
+	return pc
 }
 
 func (k *kernelDevice) Stats(context.Context) ([]PeerStats, error) {

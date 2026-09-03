@@ -10,6 +10,8 @@ import (
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
+
+	"github.com/thedatadudech/thawr/internal/stun"
 )
 
 // userspaceDevice runs wireguard-go on a TUN interface and configures it
@@ -18,6 +20,7 @@ type userspaceDevice struct {
 	name string
 	mtu  int
 	dev  *device.Device
+	bind *stunBind
 	log  *slog.Logger
 
 	mu     sync.Mutex
@@ -53,12 +56,27 @@ func openUserspace(_ context.Context, opts Options) (Device, error) {
 			log.Warn(msg)
 		},
 	}
-	dev := device.NewDevice(tdev, conn.NewDefaultBind(), logger)
-	return &userspaceDevice{name: name, mtu: opts.MTU, dev: dev, log: log}, nil
+	bind := newSTUNBind(conn.NewDefaultBind())
+	dev := device.NewDevice(tdev, bind, logger)
+	return &userspaceDevice{name: name, mtu: opts.MTU, dev: dev, bind: bind, log: log}, nil
 }
 
-func (u *userspaceDevice) Configure(_ context.Context, cfg Config) error {
-	if err := u.dev.IpcSet(renderUAPI(cfg)); err != nil {
+func (u *userspaceDevice) Configure(ctx context.Context, cfg Config) error {
+	current, err := u.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	want := make(map[Key]bool, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		want[p.PublicKey] = true
+	}
+	var remove []Key
+	for _, s := range current {
+		if !want[s.PublicKey] {
+			remove = append(remove, s.PublicKey)
+		}
+	}
+	if err := u.dev.IpcSet(renderUAPI(cfg, remove)); err != nil {
 		return fmt.Errorf("wg: configure %s: %w", u.name, err)
 	}
 	if err := u.dev.Up(); err != nil {
@@ -69,6 +87,24 @@ func (u *userspaceDevice) Configure(_ context.Context, cfg Config) error {
 	}
 	return nil
 }
+
+func (u *userspaceDevice) SetPeer(_ context.Context, p Peer) error {
+	if err := u.dev.IpcSet(renderPeerUAPI(p)); err != nil {
+		return fmt.Errorf("wg: set peer %s on %s: %w", Fingerprint(p.PublicKey), u.name, err)
+	}
+	return nil
+}
+
+func (u *userspaceDevice) RemovePeer(_ context.Context, key Key) error {
+	if err := u.dev.IpcSet(renderRemoveUAPI(key)); err != nil {
+		return fmt.Errorf("wg: remove peer %s on %s: %w", Fingerprint(key), u.name, err)
+	}
+	return nil
+}
+
+// STUNTransport sends and receives STUN through the device's own socket,
+// so the reflexive address is that of the WireGuard port.
+func (u *userspaceDevice) STUNTransport() stun.Transport { return u.bind.transport() }
 
 func (u *userspaceDevice) Stats(context.Context) ([]PeerStats, error) {
 	out, err := u.dev.IpcGet()

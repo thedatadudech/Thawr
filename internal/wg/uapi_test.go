@@ -31,11 +31,16 @@ func TestRenderUAPI(t *testing.T) {
 			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("100.64.0.8/32"), netip.MustParsePrefix("100.64.0.9/32")},
 		}},
 	}
-	got := renderUAPI(cfg)
+	gone, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := renderUAPI(cfg, []Key{gone})
 	want := strings.Join([]string{
 		"private_key=" + hex.EncodeToString(priv[:]),
 		"listen_port=51820",
-		"replace_peers=true",
+		"public_key=" + hex.EncodeToString(gone[:]),
+		"remove=true",
 		"public_key=" + hex.EncodeToString(pub[:]),
 		"endpoint=203.0.113.5:41820",
 		"replace_allowed_ips=true",
@@ -45,6 +50,7 @@ func TestRenderUAPI(t *testing.T) {
 		"replace_allowed_ips=true",
 		"allowed_ip=100.64.0.8/32",
 		"allowed_ip=100.64.0.9/32",
+		"persistent_keepalive_interval=0",
 		"",
 	}, "\n")
 	if got != want {
