@@ -99,11 +99,24 @@ func (cp *controlPlane) enrol(dir, host string) State {
 	return st
 }
 
+// shortSocket returns a socket path short enough for every platform's
+// Unix socket limit (macOS temp dirs are long).
+func shortSocket(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "th")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "c.sock")
+}
+
 func startDaemon(t *testing.T, dir string) (*Daemon, *wgtest.Fake, func()) {
 	t.Helper()
 	fake := wgtest.New("thawr0")
+	socket := shortSocket(t)
 	d, err := NewDaemon(DaemonOptions{
-		StateDir: dir, Socket: filepath.Join(dir, "c.sock"), Interface: "thawr0",
+		StateDir: dir, Socket: socket, Interface: "thawr0",
 		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "0.1.0",
 		MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond, EndpointInterval: time.Hour,
@@ -216,7 +229,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	}
 
 	// Status over the socket.
-	lc := NewLocalClient(filepath.Join(dirA, "c.sock"))
+	lc := NewLocalClient(d.opts.Socket)
 	st, err := lc.Status(context.Background())
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -260,7 +273,7 @@ func TestDaemonAppliesCachedNetMapFirst(t *testing.T) {
 		t.Errorf("device not configured from cache")
 	}
 	time.Sleep(300 * time.Millisecond)
-	lc := NewLocalClient(filepath.Join(dir, "c.sock"))
+	lc := NewLocalClient(d.opts.Socket)
 	status, err := lc.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +291,7 @@ func TestDaemonRotateKeyAndDown(t *testing.T) {
 	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
 	oldKey, _ := LoadKey(dir)
 
-	lc := NewLocalClient(filepath.Join(dir, "c.sock"))
+	lc := NewLocalClient(d.opts.Socket)
 	if err := lc.RotateKey(context.Background()); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -299,7 +312,7 @@ func TestDaemonRotateKeyAndDown(t *testing.T) {
 		t.Fatalf("down: %v", err)
 	}
 	stop()
-	if _, err := os.Stat(filepath.Join(dir, "c.sock")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(d.opts.Socket); !errors.Is(err, os.ErrNotExist) {
 		t.Error("socket not removed after stop")
 	}
 	if !fake.Closed() {
@@ -317,7 +330,7 @@ func TestDaemonRemovedPeerBacksOff(t *testing.T) {
 	if err := cp.registry.Delete(context.Background(), cp.admin, "a"); err != nil {
 		t.Fatal(err)
 	}
-	lc := NewLocalClient(filepath.Join(dir, "c.sock"))
+	lc := NewLocalClient(d.opts.Socket)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		st, err := lc.Status(context.Background())

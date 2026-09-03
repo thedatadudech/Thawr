@@ -101,7 +101,7 @@ func TestSyncOverTLS(t *testing.T) {
 	}
 	fake := wgtest.New("thawr1")
 	d, err := client.NewDaemon(client.DaemonOptions{
-		StateDir: dirA, Socket: filepath.Join(dirA, "c.sock"), Interface: "thawr1",
+		StateDir: dirA, Socket: filepath.Join(shortTempDir(t), "c.sock"), Interface: "thawr1",
 		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "0.1.0", MinBackoff: 50 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
 	})
