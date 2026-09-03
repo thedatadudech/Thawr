@@ -67,10 +67,12 @@ func TestRelayOverTLS(t *testing.T) {
 	if err != nil || got.Type != relay.TypeRecv || got.Key != relay.Key(peers[0].key) || string(got.Payload) != string(payload) {
 		t.Fatalf("b received %+v err=%v", got, err)
 	}
-	st, _ := h.srv.Status(ctx)
-	if st.Relay.Frames != 1 || st.Relay.Bytes != uint64(len(payload)) {
-		t.Errorf("status counters: %+v", st.Relay)
-	}
+	// The counters are bumped by the forwarding goroutine after the
+	// frame is queued, so they can trail the delivery by a moment.
+	waitUntil(t, "status counters", func() bool {
+		st, _ := h.srv.Status(ctx)
+		return st.Relay.Frames == 1 && st.Relay.Bytes == uint64(len(payload))
+	})
 
 	// Deleting b closes its relay session and a's frames to it are gone.
 	if code, _ := postLocal(t, cfg.AdminSocket, http.MethodDelete, "/api/v1/peers/b", nil); code != http.StatusNoContent {
