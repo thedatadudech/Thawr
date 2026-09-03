@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -42,8 +43,8 @@ func TestParseErrors(t *testing.T) {
 }
 
 func TestLoadUnreadable(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read anything")
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("root and Windows can read a mode-000 file")
 	}
 	path := filepath.Join(t.TempDir(), "p.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\n"), 0o000); err != nil {
