@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -210,7 +211,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	if err != nil || !ok || cached.Generation != withB.Generation {
 		t.Errorf("cache: ok=%v gen=%d err=%v", ok, cached.Generation, err)
 	}
-	if fi, _ := os.Stat(filepath.Join(dirA, NetMapFile)); fi != nil && fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(filepath.Join(dirA, NetMapFile)); runtime.GOOS != "windows" && fi != nil && fi.Mode().Perm() != 0o600 {
 		t.Errorf("netmap cache mode %o", fi.Mode().Perm())
 	}
 
