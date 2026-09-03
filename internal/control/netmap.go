@@ -68,19 +68,26 @@ type NetMap struct {
 	STUN []string
 }
 
-// Visibility decides whether two peers may see each other's keys.
+// Visibility decides whether two peers may see each other's keys and
+// which sources may reach a peer on which ports.
 type Visibility interface {
 	Visible(a, b store.Peer) bool
+	// FilterFor lists the receiver-side rules for dst; nil means no
+	// port is open (ICMP between visible peers stays implicit).
+	FilterFor(dst store.Peer) []FilterRule
 }
 
-// OwnerVisibility is the rule until spec 006: peers with the same
-// non-empty owner see each other.
+// OwnerVisibility is the rule of the early specs, kept for tests: peers
+// with the same non-empty owner see each other and no port is open.
 type OwnerVisibility struct{}
 
 // Visible implements Visibility.
 func (OwnerVisibility) Visible(a, b store.Peer) bool {
 	return a.OwnerID != "" && a.OwnerID == b.OwnerID
 }
+
+// FilterFor implements Visibility.
+func (OwnerVisibility) FilterFor(store.Peer) []FilterRule { return nil }
 
 // HubConfig describes the server's WireGuard interface for netmaps.
 type HubConfig struct {
@@ -144,7 +151,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			AllowedIPs: []netip.Prefix{netip.PrefixFrom(b.hub.Address, 32)},
 		},
 		Peers:  []NetPeer{},
-		Filter: []FilterRule{},
+		Filter: append([]FilterRule{}, b.visibility.FilterFor(self)...),
 		STUN:   append([]string{}, b.hub.STUNAddrs...),
 	}
 	for _, p := range all {
