@@ -85,6 +85,7 @@ func TestValidate(t *testing.T) {
 		{"long interface", "public_addr: a\noverlay:\n  interface: abcdefghijklmnopq\n", []string{"overlay.interface"}},
 		{"bad listen", "public_addr: a\nlisten:\n  https: '443'\n", []string{"listen.https"}},
 		{"no stun", "public_addr: a\nlisten:\n  stun: []\n", []string{"listen.stun: at least one"}},
+		{"negative relay limit", "public_addr: a\nrelay:\n  max_bytes_per_second: -1\n", []string{"relay.max_bytes_per_second"}},
 		{"three stun", "public_addr: a\nlisten:\n  stun: [':1', ':2', ':3']\n", []string{"at most two"}},
 		{"tls file without files", "public_addr: a\ntls:\n  mode: file\n", []string{"tls.cert_file", "tls.key_file"}},
 		{"tls bad mode", "public_addr: a\ntls:\n  mode: acme\n", []string{"tls.mode"}},
