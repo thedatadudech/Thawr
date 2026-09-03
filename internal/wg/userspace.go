@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"golang.zx2c4.com/wireguard/conn"
@@ -39,7 +40,18 @@ func openUserspace(_ context.Context, opts Options) (Device, error) {
 	log := opts.Logger.With("interface", name)
 	logger := &device.Logger{
 		Verbosef: func(format string, args ...any) { log.Debug(fmt.Sprintf(format, args...)) },
-		Errorf:   func(format string, args ...any) { log.Error(fmt.Sprintf(format, args...)) },
+		// wireguard-go reports transient conditions (a peer without an
+		// endpoint yet, a failed handshake attempt) through Errorf; they
+		// are expected during path setup, so they log as warnings and the
+		// no-endpoint case, which recurs every keepalive, as debug.
+		Errorf: func(format string, args ...any) {
+			msg := fmt.Sprintf(format, args...)
+			if strings.Contains(msg, "no known endpoint") {
+				log.Debug(msg)
+				return
+			}
+			log.Warn(msg)
+		},
 	}
 	dev := device.NewDevice(tdev, conn.NewDefaultBind(), logger)
 	return &userspaceDevice{name: name, mtu: opts.MTU, dev: dev, log: log}, nil
