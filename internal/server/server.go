@@ -19,6 +19,7 @@ import (
 
 	"github.com/thedatadudech/thawr/internal/api"
 	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/policy"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/wg"
@@ -57,6 +58,12 @@ type Server struct {
 	device         wg.Device
 	policy         atomic.Pointer[policy.Policy]
 	startedAt      time.Time
+
+	users    *control.Users
+	tokens   *control.Tokens
+	enroller *control.Enroller
+	registry *control.Registry
+	sessions *api.Sessions
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -173,10 +180,33 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		return err
 	}
 
-	handler, err := api.NewREST(api.RESTDeps{Status: s, UI: s.deps.UI, Logger: s.log})
+	if err := s.buildServices(); err != nil {
+		return err
+	}
+	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
+		Enroller: s.enroller,
+		Hub:      api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()},
+		Version:  s.deps.Version,
+		Logger:   s.log,
+	})
 	if err != nil {
 		return err
 	}
+	restDeps := api.RESTDeps{
+		Status: s, UI: s.deps.UI, Logger: s.log,
+		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry,
+		Join: s.JoinInfo(), Sessions: s.sessions,
+	}
+	webHandler, err := api.NewREST(restDeps)
+	if err != nil {
+		return err
+	}
+	restDeps.Local, restDeps.Sessions = true, nil
+	adminHandler, err := api.NewREST(restDeps)
+	if err != nil {
+		return err
+	}
+	handler := api.Combine(grpcSrv, webHandler)
 	stun, err := s.bindSTUN(ctx)
 	if err != nil {
 		return err
@@ -190,7 +220,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	if err != nil {
 		return err
 	}
-	adminSrv, adminLn, err := s.listenAdmin(ctx, handler)
+	adminSrv, adminLn, err := s.listenAdmin(ctx, adminHandler)
 	if err != nil {
 		_ = httpsLn.Close()
 		return err
@@ -218,8 +248,10 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	for {
 		select {
 		case <-ctx.Done():
+			grpcSrv.GracefulStop()
 			return s.shutdown(httpsSrv, adminSrv)
 		case e := <-errCh:
+			grpcSrv.Stop()
 			_ = s.shutdown(httpsSrv, adminSrv)
 			return e
 		case <-reload:
@@ -414,4 +446,37 @@ func listenPort(addr string) (int, error) {
 		return 0, fmt.Errorf("server: wireguard listen port %q: %w", portStr, err)
 	}
 	return port, nil
+}
+
+// buildServices wires the control-plane services on the open store.
+func (s *Server) buildServices() error {
+	users, err := control.NewUsers(s.st, s.deps.Now, s.log)
+	if err != nil {
+		return err
+	}
+	s.users = users
+	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log)
+	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion)
+	s.registry = control.NewRegistry(s.st, s.log)
+	s.sessions = api.NewSessions(s.deps.Now)
+	return nil
+}
+
+// JoinInfo is the server URL and TLS fingerprint new clients need.
+func (s *Server) JoinInfo() api.JoinInfo {
+	return api.JoinInfo{ServerURL: s.publicURL(), Fingerprint: s.tlsFingerprint}
+}
+
+// publicURL is https://public_addr, with the HTTPS listen port appended
+// when public_addr has no port and the listener is not on 443.
+func (s *Server) publicURL() string {
+	host, port, err := net.SplitHostPort(s.cfg.PublicAddr)
+	if err != nil {
+		host = s.cfg.PublicAddr
+		_, port, _ = net.SplitHostPort(s.cfg.Listen.HTTPS)
+	}
+	if port == "" || port == "443" {
+		return "https://" + host
+	}
+	return "https://" + net.JoinHostPort(host, port)
 }
