@@ -31,6 +31,7 @@ func TestParseErrors(t *testing.T) {
 		"wrong version": "version: 2\n",
 		"no version":    "acls: []\n",
 		"deny action":   "version: 1\nacls:\n  - action: deny\n    src: ['*']\n    dst: ['*:*']\n",
+		"bad selector":  "version: 1\nacls:\n  - action: accept\n    src: ['Bad Name']\n    dst: ['*:*']\n",
 		"unknown key":   "version: 1\nrules: []\n",
 	}
 	for name, doc := range cases {
