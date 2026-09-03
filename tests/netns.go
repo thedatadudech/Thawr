@@ -41,10 +41,10 @@ func newNetns(t *testing.T, suffix string) *netns {
 	if len(name) > 15 {
 		name = name[len(name)-15:]
 	}
-	run(t, "ip", "netns", "add", name)
+	ip(t, "netns", "add", name)
 	ns := &netns{name: name}
 	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "ip", "netns", "del", name).Run() })
-	ns.run(t, "ip", "link", "set", "lo", "up")
+	ns.ip(t, "link", "set", "lo", "up")
 	return ns
 }
 
@@ -54,19 +54,21 @@ func (n *netns) cmd(ctx context.Context, name string, args ...string) *exec.Cmd 
 	return exec.CommandContext(ctx, "ip", full...)
 }
 
-func (n *netns) run(t *testing.T, name string, args ...string) string {
+// ip runs an iproute2 command inside the namespace and returns its output.
+func (n *netns) ip(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := n.cmd(context.Background(), name, args...).CombinedOutput()
+	out, err := n.cmd(context.Background(), "ip", args...).CombinedOutput()
 	if err != nil {
-		t.Fatalf("in %s: %s %v: %v\n%s", n.name, name, args, err, out)
+		t.Fatalf("in %s: ip %v: %v\n%s", n.name, args, err, out)
 	}
 	return string(out)
 }
 
-func run(t *testing.T, name string, args ...string) {
+// ip runs an iproute2 command in the host namespace.
+func ip(t *testing.T, args ...string) {
 	t.Helper()
-	if out, err := exec.CommandContext(context.Background(), name, args...).CombinedOutput(); err != nil {
-		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+	if out, err := exec.CommandContext(context.Background(), "ip", args...).CombinedOutput(); err != nil {
+		t.Fatalf("ip %v: %v\n%s", args, err, out)
 	}
 }
 
