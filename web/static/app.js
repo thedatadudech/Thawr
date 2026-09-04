@@ -30,23 +30,38 @@
     return td;
   }
 
-  // pathsRow renders the paths a peer reported (spec 004) under its row.
-  function pathsRow(paths) {
+  // detailRow renders what the server knows about a peer under its row:
+  // reported paths, candidate addresses and the compiled filter.
+  function detailRow(detail) {
     const tr = document.createElement("tr");
     tr.className = "detail";
     const td = document.createElement("td");
     td.colSpan = 8;
-    if (!paths || paths.length === 0) {
-      td.textContent = "No paths reported yet.";
-    } else {
+    const section = (title, items) => {
+      const h = document.createElement("div");
+      h.className = "muted";
+      h.textContent = title;
+      td.append(h);
+      if (items.length === 0) {
+        const p = document.createElement("div");
+        p.textContent = "none";
+        td.append(p);
+        return;
+      }
       const ul = document.createElement("ul");
-      for (const path of paths) {
+      for (const text of items) {
         const li = document.createElement("li");
-        li.textContent = `${path.peer}: ${path.state}${path.endpoint ? " via " + path.endpoint : ""} (${path.updated_at})`;
+        li.textContent = text;
         ul.append(li);
       }
       td.append(ul);
-    }
+    };
+    const meta = [`version ${detail.version || "-"}`, `os ${detail.os || "-"}`];
+    if (detail.last_seen_at) meta.push(`last seen ${detail.last_seen_at}`);
+    section("Client", meta);
+    section("Paths reported", (detail.paths || []).map((p) => `${p.peer}: ${p.state}${p.endpoint ? " via " + p.endpoint : ""} (${p.updated_at})`));
+    section(`Candidates${detail.symmetric ? " (symmetric NAT)" : ""}`, (detail.endpoints || []).map((e) => `${e.addr} (${e.kind})`));
+    section("Filter", (detail.filter || []).map((f) => `${f.src} ${f.proto} ${f.port_lo === f.port_hi ? f.port_lo : f.port_lo + "-" + f.port_hi}`));
     tr.append(td);
     return tr;
   }
@@ -63,7 +78,7 @@
         if (next && next.classList.contains("detail")) { next.remove(); return; }
         try {
           const detail = await api("GET", `/api/v1/peers/${encodeURIComponent(p.name)}`);
-          tr.after(pathsRow(detail.paths));
+          tr.after(detailRow(detail));
         } catch (e) { alert(e.message); }
       }));
       if (me.role === "admin") {

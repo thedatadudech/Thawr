@@ -214,7 +214,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
-		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths,
+		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
 	}
 	webHandler, err := api.NewREST(restDeps)

@@ -25,6 +25,8 @@ type RESTDeps struct {
 	Presence PresenceSource
 	// Paths reports how each peer reaches the others; nil means unknown.
 	Paths PathsSource
+	// Endpoints reports each peer's candidate addresses; nil means unknown.
+	Endpoints EndpointSource
 	// NodeAuth and Relay enable GET /relay; without both it answers 501.
 	NodeAuth NodeAuth
 	Relay    RelaySession

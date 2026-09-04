@@ -19,6 +19,20 @@ const (
 	EndpointStable
 )
 
+// String names the kind as the client and the admin API show it.
+func (k EndpointKind) String() string {
+	switch k {
+	case EndpointLocal:
+		return "local"
+	case EndpointReflexive:
+		return "reflexive"
+	case EndpointStable:
+		return "stable"
+	default:
+		return ""
+	}
+}
+
 // Endpoint is one ip:port a peer may be reached at.
 type Endpoint struct {
 	Addr netip.AddrPort

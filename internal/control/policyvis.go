@@ -27,7 +27,11 @@ func (v PolicyVisibility) FilterFor(dst store.Peer) []FilterRule {
 	if c == nil {
 		return nil
 	}
-	rules := c.FilterFor(dst.ID)
+	return filterRules(c.FilterFor(dst.ID))
+}
+
+// filterRules converts compiled rules to netmap rules.
+func filterRules(rules []policy.FilterRule) []FilterRule {
 	out := make([]FilterRule, 0, len(rules))
 	for _, r := range rules {
 		out = append(out, FilterRule{SrcIPv4: r.Src, Proto: r.Proto, PortLo: r.Lo, PortHi: r.Hi})

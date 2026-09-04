@@ -240,22 +240,30 @@ func TestTokenCreateShowsJoinCommandOnce(t *testing.T) {
 	}
 }
 
-func TestPeersCRUD(t *testing.T) {
-	env := newRESTEnv(t)
+// enrolPeer enrols "<owner>-box" for owner and returns the peer.
+func enrolPeer(t *testing.T, env *restEnv, owner string) store.Peer {
+	t.Helper()
 	ctx := context.Background()
 	enroller := control.NewEnroller(env.st, time.Now, slog.New(slog.NewTextHandler(io.Discard, nil)), netip.MustParsePrefix("100.64.0.0/10"), "")
+	c, err := env.tokens.Create(ctx, control.LocalAdmin, control.TokenRequest{OwnerName: owner, Kind: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := enroller.Enroll(ctx, control.EnrollRequest{Token: c.Secret, PublicKey: newKey(t), Hostname: owner + "-box", OS: "linux", Arch: "amd64", ClientVersion: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Peer
+}
+
+func TestPeersCRUD(t *testing.T) {
+	env := newRESTEnv(t)
 	for _, owner := range []string{"alice", "markus"} {
-		c, err := env.tokens.Create(ctx, control.LocalAdmin, control.TokenRequest{OwnerName: owner, Kind: "human"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := enroller.Enroll(ctx, control.EnrollRequest{Token: c.Secret, PublicKey: newKey(t), Hostname: owner + "-box"}); err != nil {
-			t.Fatal(err)
-		}
+		enrolPeer(t, env, owner)
 	}
 	var peers []peerView
 	decode(t, env.do(env.local, session{}, http.MethodGet, "/api/v1/peers", nil, false), &peers)
-	if len(peers) != 2 || peers[0].Owner != "alice" || peers[0].IPv4 == "" {
+	if len(peers) != 2 || peers[0].Owner != "alice" || peers[0].IPv4 == "" || peers[0].Version != "0.1.0" || peers[0].OS != "linux/amd64" {
 		t.Errorf("list: %+v", peers)
 	}
 	_, member := env.login("alice", "alicepassword")
@@ -279,13 +287,14 @@ func TestPeersCRUD(t *testing.T) {
 	// Paths reported by a peer appear in its detail, targets by name;
 	// targets the caller may not see are left out.
 	env.paths.Set(peers[0].ID, []control.PathState{{PeerID: "unknown", State: "direct"}, {PeerID: mustPeerID(t, env, "markus-box"), State: "direct", Endpoint: "203.0.113.9:4000"}})
-	var detail struct {
-		Name  string     `json:"name"`
-		Paths []pathView `json:"paths"`
-	}
+	var detail peerDetail
 	decode(t, env.do(env.local, session{}, http.MethodGet, "/api/v1/peers/alice-laptop", nil, false), &detail)
 	if detail.Name != "alice-laptop" || len(detail.Paths) != 1 || detail.Paths[0].Peer != "markus-box" || detail.Paths[0].Endpoint != "203.0.113.9:4000" || detail.Paths[0].UpdatedAt == "" {
 		t.Errorf("detail: %+v", detail)
+	}
+	// The summary counts every reported path, visible or not.
+	if detail.PathSummary != (pathSummary{Direct: 2}) || len(detail.Endpoints) != 0 || len(detail.Filter) != 0 {
+		t.Errorf("summary and empty extras: %+v", detail)
 	}
 	if rec := env.do(env.local, session{}, http.MethodDelete, "/api/v1/peers/alice-laptop", nil, false); rec.Code != http.StatusNoContent {
 		t.Errorf("delete: %d", rec.Code)

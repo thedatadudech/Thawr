@@ -13,6 +13,8 @@ type PolicyService interface {
 	Show(ctx context.Context) control.PolicyReport
 	Check(ctx context.Context, data []byte) control.PolicyReport
 	Reload(ctx context.Context) (control.PolicyReport, error)
+	// FilterFor lists the compiled receiver-side rules of one peer.
+	FilterFor(ctx context.Context, peerID string) []control.FilterRule
 }
 
 // maxPolicyBytes bounds a document sent to /check.

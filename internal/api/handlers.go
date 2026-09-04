@@ -57,6 +57,11 @@ type PathsSource interface {
 	Get(peerID string) []control.PathState
 }
 
+// EndpointSource returns a peer's candidate addresses and NAT verdict.
+type EndpointSource interface {
+	Get(peerID string) (eps []control.Endpoint, symmetric bool)
+}
+
 // JoinInfo is what a new client needs besides the token: where the
 // server is and which certificate to trust.
 type JoinInfo struct {
@@ -282,11 +287,23 @@ type peerView struct {
 	Online     bool     `json:"online"`
 	CreatedAt  string   `json:"created_at"`
 	LastSeenAt string   `json:"last_seen_at,omitempty"`
+	// Version and OS are what the client reported.
+	Version string `json:"version"`
+	OS      string `json:"os"`
+	// PathSummary counts the paths the peer last reported by state.
+	PathSummary pathSummary `json:"path_summary"`
+}
+
+// pathSummary counts reported paths: direct, relay and everything else.
+type pathSummary struct {
+	Direct int `json:"direct"`
+	Relay  int `json:"relay"`
+	Other  int `json:"other"`
 }
 
 func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]string) peerView {
 	v := peerView{ID: p.ID, Name: p.Name, Kind: p.Kind, Mode: p.Mode, Owner: h.userName(ctx, p.OwnerID, names), Tags: p.Tags,
-		PublicKey: p.PublicKey, IPv4: p.IPv4, CreatedAt: p.CreatedAt.UTC().Format(timeFormat)}
+		PublicKey: p.PublicKey, IPv4: p.IPv4, CreatedAt: p.CreatedAt.UTC().Format(timeFormat), Version: p.ClientVersion, OS: p.OS}
 	if v.Tags == nil {
 		v.Tags = []string{}
 	}
@@ -295,6 +312,18 @@ func (h *rest) peerView(ctx context.Context, p store.Peer, names map[string]stri
 	}
 	if h.deps.Presence != nil {
 		v.Online = h.deps.Presence.Online(p.ID)
+	}
+	if h.deps.Paths != nil {
+		for _, ps := range h.deps.Paths.Get(p.ID) {
+			switch ps.State {
+			case "direct":
+				v.PathSummary.Direct++
+			case "relay":
+				v.PathSummary.Relay++
+			default:
+				v.PathSummary.Other++
+			}
+		}
 	}
 	return v
 }
@@ -321,7 +350,19 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 		h.writeControlError(w, err)
 		return
 	}
-	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}), Paths: []pathView{}}
+	detail := peerDetail{peerView: h.peerView(r.Context(), peer, map[string]string{}), Paths: []pathView{}, Endpoints: []endpointView{}, Filter: []filterView{}}
+	if h.deps.Endpoints != nil {
+		eps, symmetric := h.deps.Endpoints.Get(peer.ID)
+		detail.Symmetric = symmetric
+		for _, e := range eps {
+			detail.Endpoints = append(detail.Endpoints, endpointView{Addr: e.Addr.String(), Kind: e.Kind.String()})
+		}
+	}
+	if h.deps.Policy != nil {
+		for _, f := range h.deps.Policy.FilterFor(r.Context(), peer.ID) {
+			detail.Filter = append(detail.Filter, filterView{Src: f.SrcIPv4.String(), Proto: f.Proto, PortLo: f.PortLo, PortHi: f.PortHi})
+		}
+	}
 	if h.deps.Paths != nil {
 		names := map[string]string{}
 		if all, err := h.deps.Peers.List(r.Context(), p); err == nil {
@@ -341,10 +382,28 @@ func (h *rest) handleGetPeer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// peerDetail is one peer with the paths it reported.
+// peerDetail is one peer with the paths it reported, its candidate
+// addresses and the compiled filter its netmap carries.
 type peerDetail struct {
 	peerView
-	Paths []pathView `json:"paths"`
+	Paths     []pathView     `json:"paths"`
+	Endpoints []endpointView `json:"endpoints"`
+	Symmetric bool           `json:"symmetric"`
+	Filter    []filterView   `json:"filter"`
+}
+
+// endpointView is one candidate address with its kind.
+type endpointView struct {
+	Addr string `json:"addr"`
+	Kind string `json:"kind"`
+}
+
+// filterView is one compiled receiver-side rule.
+type filterView struct {
+	Src    string `json:"src"`
+	Proto  string `json:"proto"`
+	PortLo uint16 `json:"port_lo"`
+	PortHi uint16 `json:"port_hi"`
 }
 
 // pathView is how a peer reaches one other peer.
