@@ -369,10 +369,28 @@ access is filesystem permission (`root` and group `thawr`).
 
 `thawr client status` talks to the running daemon over
 `/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
-supports `AF_UNIX`) with a tiny JSON-over-HTTP API: `GET /status`,
-`POST /down`, `POST /rotate-key`, and `POST /ping/{name}` (mark traffic
-intent, probe, answer with the settled path). Spec 007 formats the
-output.
+supports `AF_UNIX`; mode 0660, group `thawr` where that group exists)
+with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
+`POST /rotate-key`, and `POST /ping/{name}` (mark traffic intent, probe,
+answer with the settled path).
+
+`GET /status` returns the document described by `docs/status.schema.json`:
+`version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
+`hub`, `peers[]`, `retrieved_at`. Fields are only ever added.
+`server.state` is `connected`, `reconnecting` (no netmap at all) or
+`cached` (running on the last netmap while the server is unreachable),
+with `attempt`, `next_retry_at` and `unreachable_since` alongside.
+`nat.type` is derived from STUN: `symmetric`, `none` (the mapped address
+is one of ours), `cone`, or `unknown` when STUN never answered. A peer's
+`path` is the prober's state (`idle`, `probing`, `direct`, `relay`,
+`unreachable`), `offline` when the server reports the peer offline and
+no path is in use, or `hub` for peers reached through the hub;
+`filter.dropped_5m` is a sampled five-minute window over the device's
+drop counter. The CLI is a thin renderer of that document: the table by
+default, `--json` verbatim, `--watch` redrawn every 2 s. Exit codes:
+0 connected, 1 running but the server is unreachable, 2 usage error,
+3 daemon not running. `client ping` combines `POST /ping/{name}` with
+the system `ping` and reports path changes it observes in between.
 
 ## 6. Storage
 

@@ -221,9 +221,62 @@ entry.
         hash; a member creating a `tag:prod` token got 403. nftables
         cannot run here (no CAP_NET_ADMIN); the netns policy test and the
         nftables ruleset test skip and need a Linux VM.
-- [ ] **007 CLI status** — `docs/specs/007-cli-status.md`
-      Local daemon API, `client status` text/JSON/watch, `client ping`,
-      `admin peer list/show`, exit codes.
+- [x] **007 CLI status** — `docs/specs/007-cli-status.md`
+      Status document on the local socket with connection state, NAT
+      type, typed candidates and a five-minute drop window; `client
+      status` table, `--json` (schema-validated), `--watch`; `client
+      ping` with ICMP and path changes; `admin peer list/show` with
+      version, OS, paths, candidates and the compiled filter; exit codes.
+      - The daemon serves the spec's nested document directly and the
+        CLI renders it, so there is one shape and one schema
+        (`docs/status.schema.json`, validated in `cmd/thawr` tests with
+        `santhosh-tekuri/jsonschema`, tests only). The flat spec 003
+        shape is gone; the netns tests moved to `--json` and the new
+        field names.
+      - Owner names and the receiver's kind travel in the netmap
+        (`NetPeer.owner`, `SelfInfo.kind`); the builder resolves owners
+        from the user table once per build.
+      - `server.state` is `connected`, `reconnecting` (no netmap) or
+        `cached` (netmap present, server unreachable); the daemon tracks
+        attempt, next retry and unreachable-since. `nat.type` is derived
+        from STUN (`symmetric`, `none`, `cone`, `unknown`); on this box
+        STUN maps to loopback, which discovery drops, so it reads
+        `unknown` here.
+      - A peer's `path` reads `offline` when the server reports it
+        offline and the prober is idle or unreachable; a direct or relay
+        path outlives the server's presence verdict. The hub row is
+        `direct <endpoint>` while its handshake is under 3 min old.
+      - `filter.dropped_5m` samples the device's drop counter on the
+        path loop's ticks (at most once per 5 s) and subtracts the
+        sample from five minutes ago; a counter reset reads 0.
+      - Client version and OS are persisted (migration 0002,
+        `client_version`, `os` as `linux/amd64`); sync refreshes the
+        version. `GET /peers/{name}` gained `endpoints`, `symmetric`,
+        `filter` and every peer view a `path_summary`.
+      - `client ping` = daemon probe + system `ping -c N` (`-n` on
+        Windows) with the path polled every 200 ms in between; `--count
+        0` skips ICMP for scripts and tests. Exit 0 needs a usable path
+        (direct or relay) and, with echoes, at least one reply.
+      - The spec's Windows named pipe is not implemented: the Unix
+        socket on every platform is the shipped decision (spec 003
+        notes, ARCHITECTURE §5). Unix sockets are chgrp'd to `thawr`
+        when the group exists.
+      - Usage errors exit 2 through a root flag-error func and
+        `usageArgs`; golden output lives in `cmd/thawr/testdata` and is
+        regenerated with `THAWR_UPDATE_GOLDEN=1`.
+      - Verified on this box with the real binary (userspace WireGuard,
+        server + two clients): `client status` showed the connected
+        line, both peers and the hub; `client ping bob-box` printed
+        `path: idle → direct 192.0.2.2:56213`, three echo replies and
+        exit 0; both sides then showed `direct` with handshake age and
+        RX/TX; `--json` had no secrets; `--watch` redrew twice in 3 s;
+        `admin peer list` showed `1 direct`, version and `linux/amd64`;
+        `admin peer show bob-box` listed the candidate, the reported
+        path and alice's rule; unknown peer and `--bogus` exited 2;
+        stopping the server gave `cached netmap (server unreachable
+        since 11:00; attempt 2 ...)` with exit 1; stopping the client
+        gave exit 3. No panics or races in the logs. The netns tests
+        still skip here (no CAP_NET_ADMIN).
 - [ ] **008 Mobile QR export** — `docs/specs/008-mobile-qr-export.md`
       Static peers, hub routing and forwarding, QR rendering in CLI and
       UI, one-time private key handling.

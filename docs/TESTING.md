@@ -56,15 +56,16 @@ If a step fails, the adapter code for that platform in `internal/wg`
 
 Two devices behind different home routers, server on a public host.
 
-1. `thawr client status` on each device lists its own `endpoints`: a
-   LAN address and a reflexive address with the router's public IP;
-   `symmetric` is `false` on ordinary routers.
-2. The peer shows `path: idle` and `probes: 0` until traffic flows.
+1. `thawr client status --json` on each device lists `nat.local` (a
+   LAN address) and `nat.reflexive` (the router's public IP);
+   `nat.type` is `cone` on ordinary routers.
+2. The peer shows `idle` in the PATH column (`probes: 0` in JSON) until
+   traffic flows.
 3. `thawr client ping <peer>` returns `direct` within 10 s with the
    peer's public `ip:port`; `ping` over the overlay works and the other
    device shows `direct` as well.
-4. On a symmetric NAT (many carrier-grade NATs) the device reports
-   `symmetric: true`; two such devices end at `unreachable` until the
+4. On a symmetric NAT (many carrier-grade NATs) the status line reads
+   `NAT: symmetric`; two such devices end at `unreachable` until the
    relay (spec 005).
 5. Two devices on the same LAN pick the LAN address as the path
    endpoint even though both have reflexive candidates.
@@ -73,9 +74,9 @@ Two devices behind different home routers, server on a public host.
 ## Manual checklist for the relay (spec 005)
 
 1. Put one device behind a symmetric NAT (a phone hotspot usually is
-   one) and `thawr client ping <peer>`: the JSON says `relay`, `thawr
-   client status` shows `relay.connected: true`, `relay.peers: 1`, and
-   `ping`/SSH over the overlay work.
+   one) and `thawr client ping <peer>`: the path line ends in `relay`,
+   `thawr client status --json` shows `relay.connected: true`,
+   `relay.peers: 1`, and `ping`/SSH over the overlay work.
 2. `/api/v1/status` on the server counts `relay.sessions`, `frames` and
    `bytes` growing; with `relay.max_bytes_per_second` set low, `drops`
    grows and the transfer slows.
@@ -106,3 +107,27 @@ Two devices behind different home routers, server on a public host.
    prints the previous hash.
 6. A member cannot create a token carrying a tag that `tagOwners` does
    not grant them (403 in the UI); an admin always can.
+
+## Manual checklist for the CLI (spec 007)
+
+1. `thawr client status` on a connected device: the first line ends in
+   `connected (netmap #N, Ns ago)`, the second names the backend,
+   interface, listen port and NAT type, the table has one row per
+   visible peer plus `hub`, and the exit code is 0.
+2. `thawr client ping <peer>` on an idle peer prints `path: idle →
+   direct <ip:port>` (or `relay`), three echo replies, and exits 0;
+   `client status` afterwards shows the path, the handshake age and
+   RX/TX. `--count 0` skips the echoes; an unknown peer exits 2.
+3. `thawr client status --json | jq .` shows the document from
+   `docs/status.schema.json`; it never contains `node_secret` or a
+   private key.
+4. `thawr client status --watch` redraws every 2 s and exits 0 on
+   Ctrl-C.
+5. Stop the server: within a minute the first line reads `cached netmap
+   (server unreachable since HH:MM; attempt N, next in Ns)`, the peers
+   keep their paths, and the exit code is 1. Stop the client: the exit
+   code is 3.
+6. `thawr admin peer list` shows STATE, LAST SEEN, PATHS, VERSION and
+   OS for every peer and `--online` keeps the connected ones; `thawr
+   admin peer show <name>` lists the candidates, the reported paths and
+   the compiled filter rules of the policy.
