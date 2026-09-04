@@ -50,9 +50,9 @@ func renderStatus(w io.Writer, st client.Status) error {
 // 8s)" or "cached netmap (server unreachable since 14:02; attempt 3,
 // next in 8s)".
 func serverState(s client.ServerStatus, now time.Time) string {
-	retry := fmt.Sprintf("attempt %d", s.Attempt)
-	if s.NextRetryAt != nil {
-		retry += ", next in " + humanDuration(s.NextRetryAt.Sub(now))
+	retry := fmt.Sprintf("attempt %d, retrying now", s.Attempt)
+	if s.NextRetryAt != nil && s.NextRetryAt.After(now) {
+		retry = fmt.Sprintf("attempt %d, next in %s", s.Attempt, humanDuration(s.NextRetryAt.Sub(now)))
 	}
 	switch s.State {
 	case client.ServerConnected:
@@ -127,7 +127,11 @@ func filterLine(f *client.FilterStatus) string {
 	if f == nil {
 		return "not supported by this backend"
 	}
-	return fmt.Sprintf("%d rules · %d dropped (last 5 min)", f.Rules, f.Dropped5m)
+	rules := "rules"
+	if f.Rules == 1 {
+		rules = "rule"
+	}
+	return fmt.Sprintf("%d %s · %d dropped (last 5 min)", f.Rules, rules, f.Dropped5m)
 }
 
 // truncateName cuts names longer than maxNameWidth to fit the column.
