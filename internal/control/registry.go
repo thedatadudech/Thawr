@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"github.com/thedatadudech/thawr/internal/store"
@@ -16,6 +17,9 @@ type Registry struct {
 	log    *slog.Logger
 	now    func() time.Time
 	notify Notifier
+	// overlay and tagAllowed serve CreateStatic.
+	overlay    netip.Prefix
+	tagAllowed TagAllowed
 }
 
 // NewRegistry builds the registry service. notify may be nil.

@@ -37,7 +37,7 @@ func newEnrollEnv(t *testing.T, overlay string) *enrollEnv {
 		users:    users,
 		tokens:   NewTokens(st, clk.Now, quietLogger()),
 		enroller: NewEnroller(st, clk.Now, quietLogger(), netip.MustParsePrefix(overlay), ""),
-		registry: NewRegistry(st, quietLogger()),
+		registry: NewRegistry(st, quietLogger()).WithOverlay(netip.MustParsePrefix(overlay)),
 	}
 	env.admin = asPrincipal(mustUser(t, users, "markus", store.RoleAdmin))
 	return env
