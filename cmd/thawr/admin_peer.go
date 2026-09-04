@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 )
 
@@ -80,10 +82,10 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			now := time.Now()
 			rows := make([][]string, 0, len(peers))
 			for _, p := range peers {
-				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, dash(p.Owner), dash(strings.Join(p.Tags, ",")), onlineWord(p.Online),
+				rows = append(rows, []string{p.Name, p.IPv4, p.Kind, p.Mode, dash(p.Owner), dash(strings.Join(p.Tags, ",")), onlineWord(p.Online),
 					lastSeen(p.LastSeenAt, now), pathSummaryText(p), dash(p.Version), dash(p.OS)})
 			}
-			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS"}, rows)
+			return table(cmd.OutOrStdout(), []string{"NAME", "IP", "KIND", "MODE", "OWNER", "TAGS", "STATE", "LAST SEEN", "PATHS", "VERSION", "OS"}, rows)
 		},
 	}
 	list.Flags().BoolVar(&onlineOnly, "online", false, "only peers with a live sync stream")
@@ -127,8 +129,83 @@ func newAdminPeerCmd(flags *adminFlags) *cobra.Command {
 			return err
 		},
 	}
-	cmd.AddCommand(list, show, rename, del)
+	cmd.AddCommand(list, show, newAdminAddMobileCmd(flags), rename, del)
 	return cmd
+}
+
+// mobileJSON mirrors the answer to POST /peers/mobile.
+type mobileJSON struct {
+	Peer    peerJSON `json:"peer"`
+	Config  string   `json:"config"`
+	QRSVG   string   `json:"qr_svg,omitempty"`
+	Warning string   `json:"warning"`
+}
+
+func newAdminAddMobileCmd(flags *adminFlags) *cobra.Command {
+	var (
+		owner, name, kind, out string
+		tags                   []string
+		noQR                   bool
+	)
+	cmd := &cobra.Command{
+		Use:   "add-mobile",
+		Short: "Create a phone peer and show its WireGuard config as a QR code (shown once)",
+		Long: `Registers a static peer whose WireGuard key is generated on the server,
+prints the config as a QR code for the official WireGuard app and, with
+--out, writes the .conf (mode 0600) instead of printing it. The config is
+shown once: the server keeps only the public key. The server decrypts a
+phone's traffic (threat model T4).`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if owner == "" || name == "" {
+				return &exitError{code: exitConfigError, err: fmt.Errorf("--owner and --name are required")}
+			}
+			var m mobileJSON
+			if err := newAdminClient(flags.socket).do(cmd.Context(), "POST", "/api/v1/peers/mobile", map[string]any{
+				"owner": owner, "name": name, "kind": kind, "tags": tags,
+			}, &m); err != nil {
+				return err
+			}
+			m.QRSVG = "" // the terminal renders its own
+			if flags.json {
+				return printJSON(cmd.OutOrStdout(), m)
+			}
+			return printMobile(cmd.OutOrStdout(), m, out, noQR)
+		},
+	}
+	cmd.Flags().StringVar(&owner, "owner", "", "user who owns the phone (required)")
+	cmd.Flags().StringVar(&name, "name", "", "peer name, a DNS label (required)")
+	cmd.Flags().StringVar(&kind, "kind", "human", "human, server or agent")
+	cmd.Flags().StringSliceVar(&tags, "tags", nil, "tags like tag:phones (comma separated)")
+	cmd.Flags().StringVar(&out, "out", "", "write the .conf to this file (mode 0600) instead of printing it")
+	cmd.Flags().BoolVar(&noQR, "no-qr", false, "do not print the QR code")
+	return cmd
+}
+
+// printMobile prints the warning, the QR code and the config, or writes
+// the config to out.
+func printMobile(w io.Writer, m mobileJSON, out string, noQR bool) error {
+	if _, err := fmt.Fprintf(w, "Peer %s (%s) created for %s.\nWarning: %s\n\n", m.Peer.Name, m.Peer.IPv4, m.Peer.Owner, m.Warning); err != nil {
+		return err
+	}
+	if !noQR {
+		q, err := qrcode.New(m.Config, qrcode.Medium)
+		if err != nil {
+			return fmt.Errorf("render qr: %w", err)
+		}
+		if _, err := io.WriteString(w, q.ToSmallString(false)+"\n"); err != nil {
+			return err
+		}
+	}
+	if out != "" {
+		if err := os.WriteFile(out, []byte(m.Config), 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", out, err)
+		}
+		_, err := fmt.Fprintf(w, "Config written to %s (mode 0600); delete it once the phone has scanned it.\n", out)
+		return err
+	}
+	_, err := io.WriteString(w, m.Config)
+	return err
 }
 
 func onlineWord(online bool) string {

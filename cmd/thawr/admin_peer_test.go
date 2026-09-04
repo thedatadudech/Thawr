@@ -44,7 +44,7 @@ func TestAdminPeerList(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %v", code, err)
 	}
-	for _, want := range []string{"NAME", "LAST SEEN", "PATHS", "VERSION", "OS", "alice-box", "2 direct, 1 relay", "0.1.0", "linux/amd64", "markus-box", "offline", "never"} {
+	for _, want := range []string{"NAME", "MODE", "LAST SEEN", "PATHS", "VERSION", "OS", "alice-box", "agent", "2 direct, 1 relay", "0.1.0", "linux/amd64", "markus-box", "offline", "never"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list lacks %q:\n%s", want, out)
 		}
