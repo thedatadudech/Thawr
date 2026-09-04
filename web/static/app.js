@@ -223,6 +223,36 @@
   $("#copy").addEventListener("click", () => navigator.clipboard?.writeText($("#join-command").textContent));
   $("#dismiss").addEventListener("click", () => { $("#join-command").textContent = ""; show("#token-result", false); });
 
+  // The mobile config is shown once: the dialog holds it only while
+  // open, and closing clears every trace of it.
+  const mobileDialog = $("#mobile-dialog");
+  function discardMobile() {
+    $("#mobile-config").textContent = "";
+    $("#mobile-qr").replaceChildren();
+    $("#mobile-warning").textContent = "";
+    if (mobileDialog.open) mobileDialog.close();
+  }
+  $("#mobile-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    $("#mobile-error").textContent = "";
+    const tags = f.tags.value.split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const m = await api("POST", "/api/v1/peers/mobile", { owner: f.owner.value, name: f.name.value, kind: f.kind.value, tags });
+      $("#mobile-warning").textContent = m.warning;
+      $("#mobile-config").textContent = m.config;
+      const svg = new DOMParser().parseFromString(m.qr_svg, "image/svg+xml").documentElement;
+      if (svg && svg.nodeName === "svg") $("#mobile-qr").replaceChildren(document.adoptNode(svg));
+      mobileDialog.showModal();
+      f.reset();
+      await loadPeers();
+    } catch (e) { $("#mobile-error").textContent = e.message; }
+  });
+  $("#mobile-copy").addEventListener("click", () => navigator.clipboard?.writeText($("#mobile-config").textContent));
+  $("#mobile-close").addEventListener("click", discardMobile);
+  mobileDialog.addEventListener("close", discardMobile);
+  mobileDialog.addEventListener("cancel", discardMobile);
+
   $("#user-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = ev.target;

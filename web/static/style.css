@@ -26,3 +26,9 @@ button.link { background: none; color: var(--accent); border-color: transparent;
 #policy-source { background: var(--panel, #f4f4f4); padding: .6rem; overflow-x: auto; font-size: .88rem; }
 textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .88rem; padding: .5rem; box-sizing: border-box; }
 #login form { display: flex; flex-direction: column; gap: .75rem; max-width: 20rem; }
+dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); max-width: 32rem; padding: 1rem 1.25rem; }
+dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.warning-text { color: var(--err); }
+.qr { width: min(100%, 20rem); margin: .5rem auto; background: #fff; padding: .5rem; }
+.qr svg { display: block; width: 100%; height: auto; }
+dialog pre { white-space: pre-wrap; word-break: break-all; font-size: .8rem; }
