@@ -523,7 +523,10 @@ type NetPeer struct {
 	// allowed_ips lists extra prefixes routed to this peer besides its /32.
 	AllowedIps []string `protobuf:"bytes,10,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
 	// owner is the owning user's name; empty for unowned peers.
-	Owner         string `protobuf:"bytes,11,opt,name=owner,proto3" json:"owner,omitempty"`
+	Owner string `protobuf:"bytes,11,opt,name=owner,proto3" json:"owner,omitempty"`
+	// via_hub marks a static (mobile) peer reached through the hub: the
+	// receiver adds no WireGuard peer for it, the hub routes its /32.
+	ViaHub        bool `protobuf:"varint,12,opt,name=via_hub,json=viaHub,proto3" json:"via_hub,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -633,6 +636,13 @@ func (x *NetPeer) GetOwner() string {
 		return x.Owner
 	}
 	return ""
+}
+
+func (x *NetPeer) GetViaHub() bool {
+	if x != nil {
+		return x.ViaHub
+	}
+	return false
 }
 
 // Endpoint is one ip:port candidate.
@@ -1161,7 +1171,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\x12\x1d\n" +
 	"\n" +
 	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\x12\x12\n" +
-	"\x04kind\x18\x06 \x01(\tR\x04kind\"\xb1\x02\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\"\xca\x02\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1176,7 +1186,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\vallowed_ips\x18\n" +
 	" \x03(\tR\n" +
 	"allowedIps\x12\x14\n" +
-	"\x05owner\x18\v \x01(\tR\x05owner\"J\n" +
+	"\x05owner\x18\v \x01(\tR\x05owner\x12\x17\n" +
+	"\avia_hub\x18\f \x01(\bR\x06viaHub\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"e\n" +

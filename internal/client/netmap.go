@@ -112,6 +112,9 @@ type Peer struct {
 	Symmetric  bool       `json:"symmetric"`
 	Keepalive  bool       `json:"keepalive"`
 	AllowedIPs []string   `json:"allowed_ips"`
+	// ViaHub marks a static (mobile) peer reached through the hub: no
+	// WireGuard peer and no path of its own.
+	ViaHub bool `json:"via_hub"`
 }
 
 // HubPeer is the server's WireGuard interface.
@@ -144,7 +147,7 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 	}
 	for _, p := range m.GetPeers() {
 		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
-			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(),
+			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(), ViaHub: p.GetViaHub(),
 			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...)}
 		for _, e := range p.GetEndpoints() {
 			peer.Endpoints = append(peer.Endpoints, Endpoint{Addr: e.GetAddr(), Kind: kindFromProto(e.GetKind())})
@@ -208,6 +211,9 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 		cfg.Peers = append(cfg.Peers, hub)
 	}
 	for _, p := range nm.Peers {
+		if p.ViaHub {
+			continue // the hub's allowed IPs route it
+		}
 		pub, err := wg.ParseKey(p.PublicKey)
 		if err != nil {
 			return wg.Config{}, fmt.Errorf("client: peer %s key: %w", p.Name, err)
@@ -232,14 +238,21 @@ func BuildConfig(nm NetMap, key wg.Key, listenPort int, overlay netip.Prefix) (w
 // and the hub may ping, listed sources reach the listed ports.
 func FilterSet(nm NetMap, iface string, self netip.Addr) wg.FilterSet {
 	set := wg.FilterSet{Interface: iface, Hook: wg.HookInput, Local: self}
+	seen := map[netip.Addr]bool{}
+	visible := func(ip netip.Addr) {
+		if !seen[ip] {
+			seen[ip] = true
+			set.Visible = append(set.Visible, ip)
+		}
+	}
 	for _, p := range nm.Peers {
 		if ip, err := netip.ParseAddr(p.IPv4); err == nil {
-			set.Visible = append(set.Visible, ip)
+			visible(ip)
 		}
 	}
 	for _, a := range nm.Hub.AllowedIPs {
 		if p, err := netip.ParsePrefix(a); err == nil && p.Bits() == 32 {
-			set.Visible = append(set.Visible, p.Addr())
+			visible(p.Addr())
 		}
 	}
 	for _, f := range nm.Filter {

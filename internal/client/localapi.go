@@ -216,6 +216,11 @@ func (d *Daemon) Status(ctx context.Context) Status {
 			ps.EndpointCandidates = append(ps.EndpointCandidates, Candidate(e))
 		}
 		fill(&ps)
+		if p.ViaHub {
+			ps.Path = PathHub
+			st.Peers = append(st.Peers, ps)
+			continue
+		}
 		if state, ep, probes, ok := d.pathOf(p.ID); ok {
 			ps.Path, ps.Probes = string(state), probes
 			if ep.IsValid() {

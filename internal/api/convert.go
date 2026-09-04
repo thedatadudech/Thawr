@@ -67,7 +67,7 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 	for _, p := range nm.Peers {
 		np := &thawrv1.NetPeer{
 			Id: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, PublicKey: p.PublicKey, Ipv4: p.IPv4.String(),
-			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive,
+			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive, ViaHub: p.ViaHub,
 		}
 		for _, a := range p.AllowedIPs {
 			np.AllowedIps = append(np.AllowedIps, a.String())

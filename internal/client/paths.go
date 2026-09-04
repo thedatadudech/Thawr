@@ -74,6 +74,9 @@ func (d *Daemon) syncPaths(ctx context.Context, nm NetMap, cfg wg.Config) error 
 	seen := map[string]bool{}
 	var errs []error
 	for _, p := range nm.Peers {
+		if p.ViaHub {
+			continue // routed by the hub, nothing to probe
+		}
 		key, err := wg.ParseKey(p.PublicKey)
 		if err != nil {
 			continue

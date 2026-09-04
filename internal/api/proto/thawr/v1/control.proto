@@ -96,6 +96,9 @@ message NetPeer {
   repeated string allowed_ips = 10;
   // owner is the owning user's name; empty for unowned peers.
   string owner = 11;
+  // via_hub marks a static (mobile) peer reached through the hub: the
+  // receiver adds no WireGuard peer for it, the hub routes its /32.
+  bool via_hub = 12;
 }
 
 // EndpointKind classifies a candidate address.

@@ -52,6 +52,9 @@ type NetPeer struct {
 	Symmetric  bool
 	Keepalive  bool
 	AllowedIPs []netip.Prefix
+	// ViaHub marks a static (mobile) peer: the receiver adds no
+	// WireGuard peer for it because the hub routes its address.
+	ViaHub bool
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -183,15 +186,20 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if err != nil {
 			continue
 		}
-		// Static peers are reached through the hub, whatever the policy
-		// says about visibility; spec 008 fills in hub-side filtering.
-		if p.Mode == store.ModeStatic {
-			if b.visibility.Visible(self, p) {
-				nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
-			}
+		if !b.visibility.Visible(self, p) {
 			continue
 		}
-		if !b.visibility.Visible(self, p) {
+		online := false
+		if b.presence != nil {
+			online = b.presence.Online(p.ID)
+		}
+		// Static peers are reached through the hub: their address is
+		// routed to the hub and they appear as via-hub entries so status
+		// and the receiver-side filter know them.
+		if p.Mode == store.ModeStatic {
+			nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
+			nm.Peers = append(nm.Peers, NetPeer{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: owners[p.OwnerID],
+				PublicKey: p.PublicKey, IPv4: ip, Online: online, ViaHub: true})
 			continue
 		}
 		var (
@@ -200,10 +208,6 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		)
 		if b.endpoints != nil {
 			eps, symmetric = b.endpoints.Get(p.ID)
-		}
-		online := false
-		if b.presence != nil {
-			online = b.presence.Online(p.ID)
 		}
 		nm.Peers = append(nm.Peers, NetPeer{
 			ID:         p.ID,
