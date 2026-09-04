@@ -80,6 +80,12 @@ hub           100.64.0.1    server   -       direct vpn.example.com:51820   25s 
 Filter: 3 rules · 0 dropped (last 5 min)
 ```
 
+Phones join with the official WireGuard app: `thawr admin peer add-mobile
+--owner markus --name markus-phone` prints a QR code to scan (once; the
+server keeps only the public key). Phone traffic goes through the
+server's hub, so the server can read it, unlike the end-to-end tunnels
+between laptops and servers; see the threat model.
+
 Peers find each other through STUN and WireGuard hole punching:
 same-LAN addresses first, then the public address behind the router;
 `client ping` forces the probe and shows the path in use along with the

@@ -277,9 +277,46 @@ entry.
         since 11:00; attempt 2 ...)` with exit 1; stopping the client
         gave exit 3. No panics or races in the logs. The netns tests
         still skip here (no CAP_NET_ADMIN).
-- [ ] **008 Mobile QR export** — `docs/specs/008-mobile-qr-export.md`
-      Static peers, hub routing and forwarding, QR rendering in CLI and
-      UI, one-time private key handling.
+- [x] **008 Mobile QR export** — `docs/specs/008-mobile-qr-export.md`
+      `Registry.CreateStatic`, `POST /peers/mobile`, `admin peer
+      add-mobile` with QR and `--out`, UI dialog, via-hub netmap entries,
+      hub presence from handshakes, forwarding on the hub host, netns
+      test with `wg-quick`.
+      - The private key exists in `StaticResult` and the response body
+        only; the handler zeroes the key array after rendering (the
+        config string cannot be zeroed), nothing logs it and the DB
+        holds the public key alone (tested by grepping the file).
+      - Static peers travel in agent netmaps as `via_hub` entries so
+        status shows `via hub` and the filter's visible set includes
+        them; clients create no WireGuard peer and no path machine.
+      - Presence for phones is the hub handshake (`observeOnce`, under
+        3 min); it also updates `last_seen_at`. The server implements
+        `Presence` for netmaps and REST, combining sync streams and
+        handshakes.
+      - Linux sets `/proc/sys/net/ipv4/conf/<iface>/forwarding` after
+        the hub is up (per-interface is what the kernel consults for
+        ingress traffic); other hosts log that forwarding is theirs to
+        enable.
+      - Members may add mobile peers for themselves with tags that
+        `tagOwners` grants them, mirroring tokens; admins for anyone.
+      - QR rendering is server-side: `go-qrcode` for the CLI half-block
+        text and an SVG for the embedded UI (no CDN). `gozxing` (tests
+        only) decodes the code back to the exact config.
+      - Re-adding a deleted name yields a new key; the address is what
+        the allocator picks next, usually the freed one.
+      - The integration harness uses `public_addr: 0.0.0.0`, so the
+        phone test rewrites the exported Endpoint to the server's link
+        address before `wg-quick up`.
+      - Verified on this box with the real binary (userspace hub,
+        agent client on thawr1): `add-mobile` printed the warning, a
+        35-row QR and the config; the private key was absent from the
+        server log and the SQLite file; `admin peer list` showed
+        `alice-phone static offline`; alice-box's `client status`
+        listed it `via hub`; `--out` wrote mode 0600 without printing;
+        the hub interface's forwarding flag read 1; delete removed it
+        from status within 2 s; a member creating for another owner got
+        403 over HTTPS and 201 for herself. The wg-quick data path is
+        covered by the netns tests, which skip here (no CAP_NET_ADMIN).
 
 ## Phase 2 candidates (not scheduled)
 

@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`) | Linux, root, iproute2, nftables |
 
 The integration tests use the real binary and the WireGuard adapter that
 `wg.Open` selects on the host: the kernel module when it loads, else
@@ -131,3 +131,25 @@ Two devices behind different home routers, server on a public host.
    OS for every peer and `--online` keeps the connected ones; `thawr
    admin peer show <name>` lists the candidates, the reported paths and
    the compiled filter rules of the policy.
+
+## Manual checklist for mobile peers (spec 008)
+
+1. `thawr admin peer add-mobile --owner alice --name alice-phone`
+   prints the T4 warning, a QR code that fits the terminal and the
+   config; the private key appears nowhere in the server log or in
+   `thawr.db` (`grep`). `--out phone.conf` writes the file with mode
+   0600 and prints no config; `--no-qr` prints no code.
+2. Scan the QR with the official WireGuard app (or `wg-quick up` the
+   file on a Linux box) and activate the tunnel: within a minute
+   `thawr admin peer list` shows `alice-phone static online` with a
+   last-seen age, and alice's laptop lists it as `via hub` in
+   `client status`.
+3. From the phone, open something alice's policy allows on one of her
+   peers (ssh, a web page); a denied port on another peer times out and
+   that peer's `client status` filter counts the drop; a peer alice may
+   not see does not answer at all.
+4. `thawr admin peer delete alice-phone`: the phone loses connectivity
+   within a second; `add-mobile` again yields a different key and the
+   old tunnel stays dead.
+5. In the admin UI, "Add mobile peer" opens the QR once in a dialog;
+   after "Close and discard" there is no way to see the config again.

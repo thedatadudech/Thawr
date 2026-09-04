@@ -327,14 +327,30 @@ the effective policy with its hash. Spec 006.
 
 ### 4.7 Mobile (static) peers
 
-`thawr admin peer add-mobile --owner alice --name alice-phone` generates a
-WireGuard keypair in server memory, stores the public key as a `static`
-peer, renders a standard WireGuard `.conf` with `Endpoint =
-public_addr:51820`, `AllowedIPs = <overlay cidr>`, and shows it once as
-a QR code (terminal or admin UI). The private key is discarded after
-rendering. The hub forwards between the phone and mesh peers; the
-threat model records that the server sees plaintext for static peers
-only. Spec 008.
+`thawr admin peer add-mobile --owner alice --name alice-phone` (or
+`POST /peers/mobile`, or the admin UI) asks `Registry.CreateStatic` to
+generate a WireGuard keypair in server memory, store the public key as
+a `static` peer with the next free overlay address and no node secret,
+and bump the generation. The REST layer renders a standard WireGuard
+`.conf` (`Endpoint = public_addr:51820`, `AllowedIPs = <overlay
+cidr>`, keepalive 25 s) and a QR code (half blocks in the terminal,
+SVG in the UI), returns them once and zeroes the key. Admins may
+create for any owner; members only for themselves and only with tags
+`tagOwners` grants them.
+
+The generation bump makes `followRegistry` add the phone to the hub
+interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install the
+policy's rules for it on the forward hook; the hub host forwards
+between the interface and itself (Linux: `conf/<iface>/forwarding`,
+set at startup). Agent peers receive the phone as a `via_hub` netmap
+entry: no WireGuard peer of their own, its /32 routed to the hub, its
+address in their filter's visible set, and `via hub` in `client
+status`. Presence for a phone is its hub handshake: `observeOnce`
+records it as `last_seen_at` and the peer counts as online while the
+handshake is under three minutes old. Deleting the peer removes it from
+the hub and every netmap on the next generation. The threat model
+records that the server sees plaintext for static peers only (T4);
+the CLI and the UI say so wherever the config is shown. Spec 008.
 
 ## 5. Wire interfaces
 
