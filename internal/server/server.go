@@ -67,6 +67,10 @@ type Server struct {
 	device         wg.Device
 	policySvc      *control.PolicyService
 	startedAt      time.Time
+	// staticSeen holds the latest hub handshake per static peer, the
+	// presence signal for phones.
+	staticMu   sync.Mutex
+	staticSeen map[string]time.Time
 
 	users     *control.Users
 	tokens    *control.Tokens
@@ -214,7 +218,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	}
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
-		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s.hub, Paths: s.paths, Endpoints: s.endpoints,
+		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
 	}
 	webHandler, err := api.NewREST(restDeps)
@@ -307,6 +311,7 @@ func (s *Server) startHub(ctx context.Context) error {
 	}
 	s.log.Info("wireguard hub ready", "backend", s.device.Backend(), "interface", s.device.Name(),
 		"address", s.cfg.HubAddr().String(), "listen", s.cfg.Listen.WireGuard)
+	enableForwarding(s.device.Name(), s.log)
 	return nil
 }
 
@@ -383,28 +388,68 @@ func (s *Server) observeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	byKey := make(map[string]string, len(peers))
+	byKey := make(map[string]store.Peer, len(peers))
 	for _, p := range peers {
-		byKey[p.PublicKey] = p.ID
+		byKey[p.PublicKey] = p
 	}
 	changed := false
 	for _, st := range stats {
 		if !st.Endpoint.IsValid() || st.LastHandshake.IsZero() {
 			continue
 		}
-		id, ok := byKey[st.PublicKey.String()]
+		p, ok := byKey[st.PublicKey.String()]
 		if !ok {
 			continue
 		}
-		if s.endpoints.SetObserved(id, st.Endpoint) {
+		if p.Mode == store.ModeStatic {
+			changed = s.noteStaticHandshake(ctx, p, st.LastHandshake) || changed
+			continue
+		}
+		if s.endpoints.SetObserved(p.ID, st.Endpoint) {
 			changed = true
-			s.log.Debug("hub observed peer endpoint", "peer", id, "endpoint", st.Endpoint)
+			s.log.Debug("hub observed peer endpoint", "peer", p.ID, "endpoint", st.Endpoint)
 		}
 	}
 	if changed {
 		s.hub.Changed()
 	}
 	return nil
+}
+
+// staticOnline is how recent a phone's hub handshake must be for the
+// peer to count as online; the WireGuard app keeps alive every 25 s.
+const staticOnline = 3 * time.Minute
+
+// noteStaticHandshake records a static peer's latest hub handshake as
+// its presence and last-seen time. It reports whether the peer's
+// online state flipped, so netmaps get rebuilt.
+func (s *Server) noteStaticHandshake(ctx context.Context, p store.Peer, at time.Time) bool {
+	now := s.deps.Now()
+	s.staticMu.Lock()
+	prev := s.staticSeen[p.ID]
+	s.staticSeen[p.ID] = at
+	s.staticMu.Unlock()
+	wasOnline := !prev.IsZero() && now.Sub(prev) < staticOnline
+	online := now.Sub(at) < staticOnline
+	if p.LastSeenAt == nil || at.After(*p.LastSeenAt) {
+		if err := s.st.Peers().Touch(ctx, p.ID, at); err != nil {
+			s.log.Warn("record static peer handshake", "peer", p.Name, "err", err)
+		}
+	}
+	return wasOnline != online
+}
+
+// Online implements presence for the netmap builder and the REST API:
+// agents are online while they hold a sync stream, static peers while
+// their hub handshake is fresh.
+func (s *Server) Online(peerID string) bool {
+	if s.hub.Online(peerID) {
+		return true
+	}
+	s.staticMu.Lock()
+	seen := s.staticSeen[peerID]
+	s.staticMu.Unlock()
+	return !seen.IsZero() && s.deps.Now().Sub(seen) < staticOnline
 }
 
 func (s *Server) listenHTTPS(ctx context.Context, h http.Handler) (*http.Server, net.Listener, error) {
@@ -540,11 +585,13 @@ func (s *Server) buildServices(ctx context.Context) error {
 	visibility := control.PolicyVisibility{Load: s.policySvc.Load}
 	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed)
 	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub)
-	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now)
+	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
+		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed)
+	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},
 		relay.ServerOptions{MaxBytesPerSecond: s.cfg.Relay.MaxBytesPerSecond, Now: s.deps.Now, Logger: s.log})
-	s.netmaps = control.NewNetMapBuilder(s.st, visibility, s.endpoints, hub, control.HubConfig{
+	s.netmaps = control.NewNetMapBuilder(s.st, visibility, s.endpoints, s, control.HubConfig{
 		PublicKey: s.hubKey.PublicKey().String(),
 		Endpoint:  s.cfg.HubEndpoint(),
 		Address:   s.cfg.HubAddr().Addr(),
