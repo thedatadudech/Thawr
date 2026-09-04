@@ -151,6 +151,9 @@ func TestSyncStreamsOnChange(t *testing.T) {
 	if !env.hub.Online(aID) {
 		t.Error("peer not online while streaming")
 	}
+	if p, err := env.st.Peers().GetByID(context.Background(), aID); err != nil || p.ClientVersion != "0.1.0" {
+		t.Errorf("client version after sync: %+v %v", p, err)
+	}
 
 	bID, bSecret := env.enrol("b")
 	var withB *thawrv1.NetMap

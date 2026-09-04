@@ -32,6 +32,10 @@ type Peer struct {
 	NodeSecretHash string
 	CreatedAt      time.Time
 	LastSeenAt     *time.Time
+	// ClientVersion and OS are what the client reported at enrollment
+	// (the version is refreshed on every sync).
+	ClientVersion string
+	OS            string
 }
 
 // Peers accesses the peers table.
@@ -39,7 +43,7 @@ type Peers struct {
 	q querier
 }
 
-const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, node_secret_hash, created_at, last_seen_at`
+const peerColumns = `id, name, kind, mode, owner_id, tags, public_key, ipv4, node_secret_hash, created_at, last_seen_at, client_version, os`
 
 func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 	var (
@@ -47,7 +51,7 @@ func scanPeer(row interface{ Scan(...any) error }) (Peer, error) {
 		tags, created           string
 		owner, secret, lastSeen sql.NullString
 	)
-	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &secret, &created, &lastSeen); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.Mode, &owner, &tags, &p.PublicKey, &p.IPv4, &secret, &created, &lastSeen, &p.ClientVersion, &p.OS); err != nil {
 		return Peer{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
@@ -67,9 +71,9 @@ func (s *Peers) Create(ctx context.Context, p Peer) error {
 		return fmt.Errorf("store: encode tags: %w", err)
 	}
 	_, err = s.q.ExecContext(ctx,
-		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO peers (`+peerColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Kind, p.Mode, nullString(p.OwnerID), string(tags), p.PublicKey, p.IPv4,
-		nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt))
+		nullString(p.NodeSecretHash), formatTime(p.CreatedAt), formatTimePtr(p.LastSeenAt), p.ClientVersion, p.OS)
 	if isUniqueViolation(err) {
 		return fmt.Errorf("peer %q: %w", p.Name, ErrConflict)
 	}
@@ -231,6 +235,14 @@ func (s *Peers) SetPublicKey(ctx context.Context, id, publicKey string) error {
 func (s *Peers) Touch(ctx context.Context, id string, at time.Time) error {
 	if _, err := s.q.ExecContext(ctx, `UPDATE peers SET last_seen_at = ? WHERE id = ?`, formatTime(at), id); err != nil {
 		return fmt.Errorf("store: touch peer %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetClientVersion records the version a client reports on sync.
+func (s *Peers) SetClientVersion(ctx context.Context, id, version string) error {
+	if _, err := s.q.ExecContext(ctx, `UPDATE peers SET client_version = ? WHERE id = ?`, version, id); err != nil {
+		return fmt.Errorf("store: set client version of peer %s: %w", id, err)
 	}
 	return nil
 }

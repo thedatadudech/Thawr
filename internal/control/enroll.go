@@ -162,6 +162,8 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 			IPv4:           ip.String(),
 			NodeSecretHash: hashSecret(nodeSecret),
 			CreatedAt:      now,
+			ClientVersion:  req.ClientVersion,
+			OS:             platform(req.OS, req.Arch),
 		}
 		if err := tx.Peers().Create(ctx, peer); err != nil {
 			return err
@@ -233,4 +235,16 @@ func parsePublicKey(s string) (wg.Key, error) {
 		return wg.Key{}, fmt.Errorf("%w: public_key is not a WireGuard key", ErrValidation)
 	}
 	return k, nil
+}
+
+// platform joins os and arch as "linux/amd64"; either may be empty.
+func platform(os, arch string) string {
+	switch {
+	case os == "":
+		return arch
+	case arch == "":
+		return os
+	default:
+		return os + "/" + arch
+	}
 }

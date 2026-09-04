@@ -42,6 +42,7 @@ type PeerOps interface {
 	RotateKey(ctx context.Context, peerID, newPublicKey string) (int64, error)
 	Leave(ctx context.Context, peerID string) error
 	Touch(ctx context.Context, peerID string) error
+	SetClientVersion(ctx context.Context, peerID, version string) error
 }
 
 // HubInfo describes the server's own WireGuard endpoint as advertised
@@ -139,6 +140,11 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 	if s.deps.Peers != nil {
 		if err := s.deps.Peers.Touch(ctx, me.ID); err != nil {
 			log.Warn("touch failed", "err", err)
+		}
+		if v := req.GetClientVersion(); v != "" && v != me.ClientVersion {
+			if err := s.deps.Peers.SetClientVersion(ctx, me.ID, v); err != nil {
+				log.Warn("record client version failed", "err", err)
+			}
 		}
 	}
 

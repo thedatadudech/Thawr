@@ -94,6 +94,9 @@ func TestEnrollAllocatesAndRecords(t *testing.T) {
 	if err != nil || stored.ID != res.Peer.ID {
 		t.Errorf("lookup by node secret: %+v %v", stored, err)
 	}
+	if stored.ClientVersion != "0.1.0" || stored.OS != "linux/amd64" {
+		t.Errorf("client info not persisted: %+v", stored)
+	}
 	res2, err := env.enroll(t, env.token(t, TokenRequest{}), "second")
 	if err != nil || res2.Peer.IPv4 != "100.64.0.3" || res2.Generation != 2 {
 		t.Errorf("second enroll: %+v %v", res2.Peer, err)

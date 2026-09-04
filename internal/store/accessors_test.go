@@ -231,7 +231,7 @@ func TestPeersSetPublicKeyTouchListByMode(t *testing.T) {
 	ctx := context.Background()
 	for _, p := range []Peer{
 		{ID: "p1", Name: "a", Kind: KindHuman, Mode: ModeAgent, PublicKey: "k1", IPv4: "100.64.0.2", CreatedAt: now()},
-		{ID: "p2", Name: "b", Kind: KindHuman, Mode: ModeStatic, PublicKey: "k2", IPv4: "100.64.0.3", CreatedAt: now()},
+		{ID: "p2", Name: "b", Kind: KindHuman, Mode: ModeStatic, PublicKey: "k2", IPv4: "100.64.0.3", CreatedAt: now(), ClientVersion: "0.1.0", OS: "linux/amd64"},
 	} {
 		if err := s.Peers().Create(ctx, p); err != nil {
 			t.Fatal(err)
@@ -249,12 +249,18 @@ func TestPeersSetPublicKeyTouchListByMode(t *testing.T) {
 	if err := s.Peers().Touch(ctx, "p1", now().Add(time.Minute)); err != nil {
 		t.Errorf("Touch: %v", err)
 	}
+	if err := s.Peers().SetClientVersion(ctx, "p1", "0.2.0"); err != nil {
+		t.Errorf("SetClientVersion: %v", err)
+	}
 	got, _ := s.Peers().GetByID(ctx, "p1")
-	if got.PublicKey != "k3" || got.LastSeenAt == nil || !got.LastSeenAt.Equal(now().Add(time.Minute)) {
+	if got.PublicKey != "k3" || got.LastSeenAt == nil || !got.LastSeenAt.Equal(now().Add(time.Minute)) || got.ClientVersion != "0.2.0" || got.OS != "" {
 		t.Errorf("after update: %+v", got)
 	}
 	agents, err := s.Peers().ListByMode(ctx, ModeAgent)
 	if err != nil || len(agents) != 1 || agents[0].ID != "p1" {
 		t.Errorf("ListByMode: %v %v", agents, err)
+	}
+	if b, _ := s.Peers().GetByID(ctx, "p2"); b.ClientVersion != "0.1.0" || b.OS != "linux/amd64" {
+		t.Errorf("client info round trip: %+v", b)
 	}
 }

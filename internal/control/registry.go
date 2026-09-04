@@ -189,6 +189,11 @@ func (r *Registry) Touch(ctx context.Context, peerID string) error {
 	return r.store.Peers().Touch(ctx, peerID, r.now())
 }
 
+// SetClientVersion records the version a client reported on sync.
+func (r *Registry) SetClientVersion(ctx context.Context, peerID, version string) error {
+	return r.store.Peers().SetClientVersion(ctx, peerID, version)
+}
+
 // Generation returns the current netmap generation.
 func (r *Registry) Generation(ctx context.Context) (int64, error) {
 	return r.store.Meta().Generation(ctx)
