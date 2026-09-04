@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thawr.dev/schemas/status.json",
+  "title": "thawr client status",
+  "description": "Document served on the client's local socket (GET /status) and printed by `thawr client status --json`. Fields are only ever added.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "self", "server", "wireguard", "nat", "relay", "peers", "retrieved_at"],
+  "properties": {
+    "version": { "type": "string", "description": "Client binary version." },
+    "self": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "peer_id", "ipv4", "kind"],
+      "properties": {
+        "name": { "type": "string" },
+        "peer_id": { "type": "string" },
+        "ipv4": { "type": "string", "description": "Overlay address." },
+        "kind": { "$ref": "#/$defs/kind" }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["addr", "state", "attempt", "next_retry_at", "unreachable_since", "generation", "last_message_at", "last_error"],
+      "properties": {
+        "addr": { "type": "string", "description": "host:port of the control server." },
+        "state": { "type": "string", "enum": ["connected", "reconnecting", "cached"] },
+        "attempt": { "type": "integer", "minimum": 0, "description": "Failed connection attempts since the last successful one." },
+        "next_retry_at": { "$ref": "#/$defs/nullableTime" },
+        "unreachable_since": { "$ref": "#/$defs/nullableTime" },
+        "generation": { "type": "integer", "minimum": 0, "description": "Netmap generation in use; 0 when none." },
+        "last_message_at": { "$ref": "#/$defs/nullableTime" },
+        "last_error": { "type": "string" }
+      }
+    },
+    "wireguard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "interface", "listen_port"],
+      "properties": {
+        "backend": { "type": "string", "description": "kernel, userspace or fake." },
+        "interface": { "type": "string" },
+        "listen_port": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
+    },
+    "nat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "reflexive", "local"],
+      "properties": {
+        "type": { "type": "string", "enum": ["unknown", "none", "cone", "symmetric"] },
+        "reflexive": { "type": "array", "items": { "type": "string" } },
+        "local": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "relay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connected", "peers"],
+      "properties": {
+        "connected": { "type": "boolean" },
+        "peers": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules", "drops", "dropped_5m", "flows"],
+      "properties": {
+        "rules": { "type": "integer", "minimum": 0 },
+        "drops": { "type": "integer", "minimum": 0 },
+        "dropped_5m": { "type": "integer", "minimum": 0 },
+        "flows": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "hub": { "$ref": "#/$defs/peer" },
+    "peers": { "type": "array", "items": { "$ref": "#/$defs/peer" } },
+    "retrieved_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "kind": { "type": "string", "enum": ["", "human", "server", "agent"] },
+    "nullableTime": { "type": ["string", "null"], "format": "date-time" },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "ipv4", "kind", "owner", "online", "public_key", "path", "path_endpoint", "probes", "endpoint_candidates", "last_handshake_at", "rx_bytes", "tx_bytes"],
+      "properties": {
+        "name": { "type": "string" },
+        "ipv4": { "type": "string" },
+        "kind": { "$ref": "#/$defs/kind" },
+        "owner": { "type": "string", "description": "Owning user's name; empty when unowned." },
+        "online": { "type": "boolean", "description": "The server currently has a sync stream from this peer." },
+        "public_key": { "type": "string" },
+        "path": { "type": "string", "enum": ["idle", "probing", "direct", "relay", "unreachable", "offline", "hub"] },
+        "path_endpoint": { "type": "string", "description": "ip:port a direct path uses; empty otherwise." },
+        "probes": { "type": "integer", "minimum": 0 },
+        "endpoint_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["addr", "kind"],
+            "properties": {
+              "addr": { "type": "string" },
+              "kind": { "type": "string", "enum": ["local", "reflexive", "stable"] }
+            }
+          }
+        },
+        "last_handshake_at": { "$ref": "#/$defs/nullableTime" },
+        "rx_bytes": { "type": "integer", "minimum": 0 },
+        "tx_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

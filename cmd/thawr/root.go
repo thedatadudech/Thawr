@@ -18,6 +18,10 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	// Usage errors exit 2 so scripts can tell them from failures.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return &exitError{code: exitConfigError, err: err}
+	})
 	root.AddCommand(newServerCmd(), newClientCmd(), newAdminCmd(), newVersionCmd())
 	return root
 }

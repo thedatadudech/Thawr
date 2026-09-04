@@ -419,6 +419,7 @@ long as endpoints have not changed.
 | `github.com/spf13/cobra` | CLI subcommands | Apache-2.0 |
 | `golang.org/x/term` | Password prompt without echo | BSD-3-Clause |
 | `github.com/bufbuild/buf` (build time only, via `go run`) | Protobuf compilation in `make proto` | Apache-2.0 |
+| `github.com/santhosh-tekuri/jsonschema/v6` (tests only; pulls `github.com/dlclark/regexp2`) | Validates `client status --json` against `docs/status.schema.json` | Apache-2.0 (regexp2: MIT) |
 
 All pure Go. The binary builds with `CGO_ENABLED=0` on Linux, macOS, and
 Windows with Go 1.26 or newer (the minimum required by the gRPC and
