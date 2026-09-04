@@ -134,7 +134,7 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 			if err := enc.Encode(st); err != nil {
 				return err
 			}
-			if !st.Connected {
+			if st.Server.State != client.ServerConnected {
 				return &exitError{code: exitNotConnected, err: errors.New("client is running but not connected to the server")}
 			}
 			return nil

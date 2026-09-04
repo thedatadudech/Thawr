@@ -88,7 +88,7 @@ func TestDaemonProbesOnIntent(t *testing.T) {
 	}
 	lc := NewLocalClient(d.opts.Socket)
 	st, err := lc.Status(context.Background())
-	if err != nil || len(st.Peers) != 1 || st.Peers[0].Path != "idle" || st.Peers[0].Endpoint != "" || len(st.Endpoints) != 2 || st.Endpoints[1] != "203.0.113.5:"+itoa(st.ListenPort) {
+	if err != nil || len(st.Peers) != 1 || st.Peers[0].Path != PathOffline || st.Peers[0].PathEndpoint != "" || len(st.NAT.Local) != 1 || len(st.NAT.Reflexive) != 1 || st.NAT.Reflexive[0] != "203.0.113.5:"+itoa(st.WireGuard.ListenPort) || st.NAT.Type != NATCone {
 		t.Fatalf("idle status: %+v err=%v", st, err)
 	}
 
@@ -112,7 +112,7 @@ func TestDaemonProbesOnIntent(t *testing.T) {
 		t.Errorf("triggers = %d, want one per candidate", n)
 	}
 	st, _ = lc.Status(context.Background())
-	if st.Peers[0].Path != "direct" || st.Peers[0].PathEndpoint != candLAN1.String() || st.Peers[0].Endpoint != candLAN1.String() || st.Peers[0].Probes != 2 || len(st.Peers[0].Candidates) != 3 {
+	if st.Peers[0].Path != "direct" || st.Peers[0].PathEndpoint != candLAN1.String() || st.Peers[0].Probes != 2 || len(st.Peers[0].EndpointCandidates) != 3 || st.Peers[0].EndpointCandidates[2].Kind != KindReflexive {
 		t.Errorf("direct status: %+v", st.Peers[0])
 	}
 	waitFor(t, "path report on the server", func() bool {
@@ -129,7 +129,7 @@ func TestDaemonProbesOnIntent(t *testing.T) {
 	// Our own reflexive candidate reached the server (port-preserving guess).
 	waitFor(t, "reflexive endpoint reported", func() bool {
 		eps, _ := cp.endpoints.Get(stA.PeerID)
-		return len(eps) == 2 && eps[1].Kind == control.EndpointReflexive && eps[1].Addr.Port() == uint16(st.ListenPort)
+		return len(eps) == 2 && eps[1].Kind == control.EndpointReflexive && eps[1].Addr.Port() == uint16(st.WireGuard.ListenPort)
 	})
 }
 
@@ -187,7 +187,7 @@ func TestDaemonSymmetricPeersUseRelay(t *testing.T) {
 	defer stop()
 	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 && nm.Peers[0].Symmetric })
 	lc := NewLocalClient(d.opts.Socket)
-	waitFor(t, "own symmetric verdict", func() bool { st, _ := lc.Status(context.Background()); return st.Symmetric })
+	waitFor(t, "own symmetric verdict", func() bool { st, _ := lc.Status(context.Background()); return st.NAT.Type == NATSymmetric })
 	if st, _ := lc.Status(context.Background()); st.Relay.Connected {
 		t.Fatal("relay connected before any peer needed it")
 	}

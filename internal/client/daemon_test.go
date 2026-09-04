@@ -289,7 +289,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if !st.Connected || st.Name != "a" || len(st.Peers) != 1 || st.Peers[0].Name != "b" || st.Hub == nil || st.Backend != "fake" {
+	if st.Server.State != ServerConnected || st.Self.Name != "a" || st.Self.Kind != "human" || len(st.Peers) != 1 || st.Peers[0].Name != "b" || st.Hub == nil || st.WireGuard.Backend != "fake" {
 		t.Errorf("status: %+v", st)
 	}
 
@@ -333,7 +333,7 @@ func TestDaemonAppliesCachedNetMapFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Connected || status.LastError == "" || status.Generation != 9 {
+	if status.Server.State != ServerCached || status.Server.LastError == "" || status.Server.Generation != 9 {
 		t.Errorf("status while offline: %+v", status)
 	}
 }
@@ -389,7 +389,7 @@ func TestDaemonRemovedPeerBacksOff(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		st, err := lc.Status(context.Background())
-		if err == nil && !st.Connected && st.LastError != "" {
+		if err == nil && st.Server.State == ServerCached && st.Server.LastError != "" && st.Server.Attempt > 0 && st.Server.NextRetryAt != nil && st.Server.UnreachableSince != nil {
 			break
 		}
 		if time.Now().After(deadline) {

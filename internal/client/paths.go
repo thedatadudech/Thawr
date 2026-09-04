@@ -185,6 +185,9 @@ func (d *Daemon) pathTick(ctx context.Context) {
 		d.log.Debug("device stats", "err", err)
 	}
 	now := d.opts.Now()
+	if fd, ok := dev.(wg.Filterable); ok {
+		d.drops.Record(now, fd.FilterStats().Drops)
+	}
 	var report []PathResult
 	d.pmu.Lock()
 	changed := false

@@ -41,9 +41,9 @@ func TestDaemonInstallsFilter(t *testing.T) {
 	if len(wantVisible) != 0 {
 		t.Errorf("visible set lacks %v (got %v)", wantVisible, set.Visible)
 	}
-	fake.Drops = 3
+	fake.SetDrops(3)
 	st, err := NewLocalClient(d.opts.Socket).Status(context.Background())
-	if err != nil || st.Filter == nil || st.Filter.Rules != 1 || st.Filter.Drops != 3 {
+	if err != nil || st.Filter == nil || st.Filter.Rules != 1 || st.Filter.Drops != 3 || st.Filter.Dropped5m != 3 {
 		t.Fatalf("status filter: %+v err=%v", st.Filter, err)
 	}
 	// The cached netmap carries the filter too.
