@@ -27,6 +27,7 @@ type NetMap struct {
 	Generation int64     `json:"generation"`
 	SelfID     string    `json:"self_id"`
 	SelfName   string    `json:"self_name"`
+	SelfKind   string    `json:"self_kind"`
 	SelfIPv4   string    `json:"self_ipv4"`
 	Overlay    string    `json:"overlay"`
 	Peers      []Peer    `json:"peers"`
@@ -103,6 +104,7 @@ type Peer struct {
 	ID         string     `json:"id"`
 	Name       string     `json:"name"`
 	Kind       string     `json:"kind"`
+	Owner      string     `json:"owner"`
 	PublicKey  string     `json:"public_key"`
 	IPv4       string     `json:"ipv4"`
 	Online     bool       `json:"online"`
@@ -125,6 +127,7 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		Generation: m.GetGeneration(),
 		SelfID:     m.GetSelf().GetId(),
 		SelfName:   m.GetSelf().GetName(),
+		SelfKind:   m.GetSelf().GetKind(),
 		SelfIPv4:   m.GetSelf().GetIpv4(),
 		Overlay:    m.GetSelf().GetOverlayCidr(),
 		Peers:      []Peer{},
@@ -140,7 +143,7 @@ func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 		nm.Filter = append(nm.Filter, FilterRule{Src: f.GetSrcIpv4(), Proto: f.GetProto(), PortLo: uint16(f.GetPortLo()), PortHi: uint16(f.GetPortHi())}) //nolint:gosec // range-checked above
 	}
 	for _, p := range m.GetPeers() {
-		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
+		peer := Peer{ID: p.GetId(), Name: p.GetName(), Kind: p.GetKind(), Owner: p.GetOwner(), PublicKey: p.GetPublicKey(), IPv4: p.GetIpv4(),
 			Online: p.GetOnline(), Symmetric: p.GetSymmetric(), Keepalive: p.GetKeepalive(),
 			Endpoints: []Endpoint{}, AllowedIPs: append([]string{}, p.GetAllowedIps()...)}
 		for _, e := range p.GetEndpoints() {

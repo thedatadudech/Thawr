@@ -30,6 +30,7 @@ type NetPeer struct {
 	ID         string
 	Name       string
 	Kind       string
+	Owner      string
 	PublicKey  string
 	IPv4       netip.Addr
 	Online     bool
@@ -59,6 +60,7 @@ type NetMap struct {
 	Generation int64
 	SelfID     string
 	SelfName   string
+	SelfKind   string
 	SelfIPv4   netip.Addr
 	Overlay    netip.Prefix
 	Peers      []NetPeer
@@ -139,10 +141,15 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 	if err != nil {
 		return NetMap{}, fmt.Errorf("control: peer %s address %q: %w", self.ID, self.IPv4, err)
 	}
+	owners, err := b.ownerNames(ctx)
+	if err != nil {
+		return NetMap{}, err
+	}
 	nm := NetMap{
 		Generation: b.generation(),
 		SelfID:     self.ID,
 		SelfName:   self.Name,
+		SelfKind:   self.Kind,
 		SelfIPv4:   selfIP,
 		Overlay:    b.hub.Overlay,
 		Hub: HubPeer{
@@ -188,6 +195,7 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 			ID:         p.ID,
 			Name:       p.Name,
 			Kind:       p.Kind,
+			Owner:      owners[p.OwnerID],
 			PublicKey:  p.PublicKey,
 			IPv4:       ip,
 			Online:     online,
@@ -197,4 +205,17 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		})
 	}
 	return nm, nil
+}
+
+// ownerNames maps user ids to names so netmaps can show owners.
+func (b *NetMapBuilder) ownerNames(ctx context.Context) (map[string]string, error) {
+	users, err := b.store.Users().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("control: list users: %w", err)
+	}
+	names := make(map[string]string, len(users))
+	for _, u := range users {
+		names[u.ID] = u.Name
+	}
+	return names, nil
 }

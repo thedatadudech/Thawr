@@ -76,6 +76,8 @@ message SelfInfo {
   string overlay_cidr = 4;
   // stun_addrs are the server's STUN listeners as host:port (one or two).
   repeated string stun_addrs = 5;
+  // kind is the receiving peer's kind (human, server, agent).
+  string kind = 6;
 }
 
 // NetPeer is one visible peer.
@@ -92,6 +94,8 @@ message NetPeer {
   bool keepalive = 9;
   // allowed_ips lists extra prefixes routed to this peer besides its /32.
   repeated string allowed_ips = 10;
+  // owner is the owning user's name; empty for unowned peers.
+  string owner = 11;
 }
 
 // EndpointKind classifies a candidate address.
