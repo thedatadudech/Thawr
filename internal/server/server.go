@@ -220,6 +220,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
+		Hub: api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: s.cfg.HubEndpoint(), Overlay: s.cfg.OverlayPrefix()},
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {

@@ -45,6 +45,9 @@ type PeersService interface {
 	Get(ctx context.Context, by control.Principal, name string) (store.Peer, error)
 	Rename(ctx context.Context, by control.Principal, name, newName string) error
 	Delete(ctx context.Context, by control.Principal, name string) error
+	// CreateStatic registers a static (mobile) peer and returns its
+	// private key once.
+	CreateStatic(ctx context.Context, by control.Principal, req control.StaticRequest) (control.StaticResult, error)
 }
 
 // PresenceSource reports whether a peer currently has a Sync stream.

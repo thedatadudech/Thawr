@@ -438,6 +438,7 @@ long as endpoints have not changed.
 | `golang.org/x/term` | Password prompt without echo | BSD-3-Clause |
 | `github.com/bufbuild/buf` (build time only, via `go run`) | Protobuf compilation in `make proto` | Apache-2.0 |
 | `github.com/santhosh-tekuri/jsonschema/v6` (tests only; pulls `github.com/dlclark/regexp2`) | Validates `client status --json` against `docs/status.schema.json` | Apache-2.0 (regexp2: MIT) |
+| `github.com/makiuchi-d/gozxing` (tests only; pulls `golang.org/x/xerrors`) | Decodes the mobile QR back to the config in `TestQRRoundTrip` | Apache-2.0 (xerrors: BSD-3-Clause) |
 
 All pure Go. The binary builds with `CGO_ENABLED=0` on Linux, macOS, and
 Windows with Go 1.26 or newer (the minimum required by the gRPC and

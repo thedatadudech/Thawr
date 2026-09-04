@@ -48,13 +48,14 @@ func newRESTEnv(t *testing.T, mods ...func(*RESTDeps, *restEnv)) *restEnv {
 	}
 	env := &restEnv{t: t, st: st, users: users,
 		tokens:   control.NewTokens(st, now, quiet),
-		registry: control.NewRegistry(st, quiet),
+		registry: control.NewRegistry(st, quiet).WithOverlay(netip.MustParsePrefix("100.64.0.0/10")),
 		sessions: NewSessions(now),
 		paths:    control.NewPathTable(now),
 	}
 	ui := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("Thawr")}}
 	deps := RESTDeps{Status: fakeStatus{}, UI: ui, Logger: quiet, Users: users, Auth: users, Tokens: env.tokens,
-		Peers: env.registry, Paths: env.paths, Sessions: env.sessions, Join: JoinInfo{ServerURL: "https://vpn.example.com", Fingerprint: "sha256:ab"}}
+		Peers: env.registry, Paths: env.paths, Sessions: env.sessions, Join: JoinInfo{ServerURL: "https://vpn.example.com", Fingerprint: "sha256:ab"},
+		Hub: HubInfo{PublicKey: "HUBPUBKEY=", Endpoint: "vpn.example.com:51820", Overlay: netip.MustParsePrefix("100.64.0.0/10")}}
 	for _, m := range mods {
 		m(&deps, env)
 	}
