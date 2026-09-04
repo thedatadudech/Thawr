@@ -63,7 +63,8 @@ func TestStatusRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (set THAWR_UPDATE_GOLDEN=1 to create it): %v", err)
 	}
-	if got := out.String(); got != string(want) {
+	// A checkout with CRLF conversion must not fail the comparison.
+	if got, want := out.String(), strings.ReplaceAll(string(want), "\r\n", "\n"); got != want {
 		t.Errorf("render differs from %s:\n--- got ---\n%s--- want ---\n%s", golden, got, want)
 	}
 	for _, want := range []string{"connected (netmap #42, 3s ago)", "NAT: cone (reflexive 203.0.113.9:41820)", "direct 198.51.100.4:51820", "1.2 MB / 340 kB", "via hub", "never", "3 rules · 0 dropped (last 5 min)"} {
