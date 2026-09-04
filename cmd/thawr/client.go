@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -167,33 +166,23 @@ server is unreachable, 2 usage error, 3 client not running.`,
 	}
 	addClientCommonFlags(rotate, &stateDir, &socket)
 
+	var pingCount int
+	var pingJSON bool
 	ping := &cobra.Command{
 		Use:   "ping <peer>",
-		Short: "Establish a path to a peer and report it (JSON; spec 007 adds the table view)",
+		Short: "Establish a path to a peer, send ICMP echoes and report the path in use",
 		Long: `Marks traffic intent toward the named peer so the client probes its
-candidates now, waits until the path is settled and prints the result.
-Exit code 1 when no direct path was found.`,
-		Args: cobra.ExactArgs(1),
+candidates now, prints every path change, sends --count echoes with the
+system ping to the peer's overlay address and ends with the settled
+path. Exit codes: 0 path in use and echo answered, 1 no path or no
+reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
+		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := client.NewLocalClient(socket).Ping(cmd.Context(), args[0])
-			if err != nil {
-				var le *client.LocalError
-				if errors.As(err, &le) {
-					return &exitError{code: exitConfigError, err: err}
-				}
-				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
-			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(res); err != nil {
-				return err
-			}
-			if res.State != "direct" {
-				return &exitError{code: exitNotConnected, err: fmt.Errorf("no direct path to %s (%s)", args[0], res.State)}
-			}
-			return nil
+			return runPing(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), pingOptions{socket: socket, peer: args[0], count: pingCount, asJSON: pingJSON})
 		},
 	}
+	ping.Flags().IntVar(&pingCount, "count", 3, "ICMP echoes to send; 0 only establishes the path")
+	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
 	cmd.AddCommand(up, down, status, rotate, ping)

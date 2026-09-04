@@ -193,6 +193,17 @@ func TestStatusJSONSchema(t *testing.T) {
 // fakeDaemon serves a canned status document on a Unix socket.
 func fakeDaemon(t *testing.T, st client.Status) string {
 	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(st)
+	})
+	return fakeDaemonSocket(t, mux)
+}
+
+// fakeDaemonSocket serves h on a short Unix socket path.
+func fakeDaemonSocket(t *testing.T, h http.Handler) string {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "th")
 	if err != nil {
 		t.Fatal(err)
@@ -204,12 +215,7 @@ func fakeDaemon(t *testing.T, st client.Status) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(st)
-	})
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: time.Second}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return sock

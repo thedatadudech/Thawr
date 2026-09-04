@@ -36,3 +36,13 @@ func newVersionCmd() *cobra.Command {
 		},
 	}
 }
+
+// usageArgs turns a positional-argument error into exit code 2.
+func usageArgs(check cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := check(cmd, args); err != nil {
+			return &exitError{code: exitConfigError, err: err}
+		}
+		return nil
+	}
+}
