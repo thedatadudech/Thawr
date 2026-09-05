@@ -1,0 +1,19 @@
+[Unit]
+Description=Thawr control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/thawr server --config /etc/thawr/server.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=thawr
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/thawr
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
