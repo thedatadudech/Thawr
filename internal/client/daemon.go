@@ -153,6 +153,8 @@ type Daemon struct {
 	drops *dropWindow
 	// dns is the resolver's state (guarded by mu).
 	dns dnsState
+	// dnsRegMu serialises resolver registration and removal.
+	dnsRegMu sync.Mutex
 
 	mu        sync.Mutex
 	key       wg.Key

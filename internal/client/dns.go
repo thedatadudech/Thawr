@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/thedatadudech/thawr/internal/dns"
 )
@@ -160,6 +161,10 @@ func (d *Daemon) startDNS(ctx context.Context) {
 			d.dns.err = err.Error()
 			d.mu.Unlock()
 			d.log.Error("dns: resolver stopped", "err", err)
+			// The OS must not keep routing .thawr to a dead listener.
+			undoCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			d.unregisterDNS(undoCtx)
 		}
 	}()
 	d.log.Info("dns: serving zone", "zone", dns.Zone, "listen", addr.String())
@@ -179,19 +184,19 @@ func (d *Daemon) dnsServerOptions() dns.Options {
 // registerDNS routes the zone to the resolver once it serves and a
 // netmap has been applied, after clearing what a crashed instance may
 // have left, and hands the current entries to the registrar on every
-// netmap. Nothing is registered while the resolver is not bound: the
-// OS would route .thawr into a void.
+// netmap. Nothing is registered while the resolver is not bound (the
+// OS would route .thawr into a void); a failed registration is retried
+// with the next netmap. regMu serialises registration, update and
+// removal: apply runs from the sync loop and from a key rotation.
 func (d *Daemon) registerDNS(ctx context.Context) {
 	o := d.opts.DNS
 	if o.Mode != DNSOn || o.Registrar == nil {
 		return
 	}
+	d.dnsRegMu.Lock()
+	defer d.dnsRegMu.Unlock()
 	d.mu.Lock()
-	serving := d.dns.serving
-	registered := d.dns.registered
-	if serving {
-		d.dns.registered = true
-	}
+	serving, registered := d.dns.serving, d.dns.registered
 	d.mu.Unlock()
 	if !serving {
 		return
@@ -202,19 +207,23 @@ func (d *Daemon) registerDNS(ctx context.Context) {
 		}
 		method, err := o.Registrar.Register(ctx, d.iface(), d.selfIP)
 		d.mu.Lock()
-		d.dns.method = method
-		if err != nil {
-			if !errors.Is(err, dns.ErrUnsupported) {
-				d.dns.err = err.Error()
-			}
-			d.dns.method = dns.MethodNone
+		switch {
+		case err == nil:
+			d.dns.registered, d.dns.method, d.dns.err = true, method, ""
+		case errors.Is(err, dns.ErrUnsupported):
+			// Nothing to retry: the platform has no method.
+			d.dns.registered, d.dns.method = true, dns.MethodNone
+		default:
+			d.dns.method, d.dns.err = dns.MethodNone, err.Error()
 		}
 		d.mu.Unlock()
 		switch {
 		case errors.Is(err, dns.ErrUnsupported):
 			d.log.Warn("dns: no resolver registration on this platform; point your resolver at the listen address for the zone", "zone", dns.Zone, "listen", d.selfIP)
+			return
 		case err != nil:
-			d.log.Warn("dns: resolver registration failed", "method", method, "err", err)
+			d.log.Warn("dns: resolver registration failed; retrying with the next netmap", "method", method, "err", err)
+			return
 		default:
 			d.log.Info("dns: zone registered", "zone", dns.Zone, "method", method)
 		}
@@ -224,18 +233,31 @@ func (d *Daemon) registerDNS(ctx context.Context) {
 	}
 }
 
-// unregisterDNS undoes registerDNS on shutdown.
+// unregisterDNS undoes registerDNS: on shutdown, and when the resolver
+// stops while the daemon keeps running, so the OS never routes .thawr
+// to a dead listener. The flag is cleared only after the registrar
+// succeeded, so the deferred call at exit retries a failure.
 func (d *Daemon) unregisterDNS(ctx context.Context) {
 	o := d.opts.DNS
+	if o.Registrar == nil {
+		return
+	}
+	d.dnsRegMu.Lock()
+	defer d.dnsRegMu.Unlock()
 	d.mu.Lock()
 	registered := d.dns.registered
 	d.mu.Unlock()
-	if !registered || o.Registrar == nil {
+	if !registered {
 		return
 	}
 	if err := o.Registrar.Unregister(ctx, d.iface()); err != nil {
 		d.log.Warn("dns: unregister", "err", err)
+		return
 	}
+	d.mu.Lock()
+	d.dns.registered = false
+	d.dns.method = dns.MethodNone
+	d.mu.Unlock()
 }
 
 // iface is the interface name the device reports, or the configured one
