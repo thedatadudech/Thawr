@@ -1,0 +1,57 @@
+name: release
+
+# Builds the release archives from a tag, checks that the build is
+# reproducible and publishes a GitHub Release with SHA256SUMS.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+      - name: test
+        env:
+          CGO_ENABLED: "1" # race runtime needs cgo; the binary stays CGO_ENABLED=0
+        run: go test -race -count=1 ./...
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: build archives
+        run: make release VERSION="$GITHUB_REF_NAME"
+      - name: verify reproducibility
+        run: make release-verify VERIFY_VERSION="$GITHUB_REF_NAME"
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes $prerelease
