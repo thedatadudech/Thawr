@@ -46,7 +46,7 @@ func ensureServerDirs(deps cliDeps, dataDir, adminSocket string) error {
 	if err := deps.mkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("create data_dir %s: %w", dataDir, err)
 	}
-	if dir := filepath.Dir(adminSocket); dir != dataDir {
+	if dir := filepath.Dir(adminSocket); filepath.Clean(dir) != filepath.Clean(dataDir) {
 		if err := deps.mkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("create admin socket directory %s: %w", dir, err)
 		}
