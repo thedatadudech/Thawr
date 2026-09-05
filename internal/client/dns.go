@@ -43,7 +43,13 @@ type DNSOptions struct {
 	Registrar dns.Registrar
 	// Listen defaults to dns.Listen.
 	Listen func(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Listener, error)
+	// OpTimeout bounds each registrar call (10 s), so a hanging
+	// resolvectl or PowerShell never blocks registration or cleanup.
+	OpTimeout time.Duration
 }
+
+// defaultDNSOpTimeout bounds one registrar call.
+const defaultDNSOpTimeout = 10 * time.Second
 
 func (o DNSOptions) withDefaults() DNSOptions {
 	if o.Mode == "" {
@@ -51,6 +57,9 @@ func (o DNSOptions) withDefaults() DNSOptions {
 	}
 	if o.Port == 0 {
 		o.Port = 53
+	}
+	if o.OpTimeout == 0 {
+		o.OpTimeout = defaultDNSOpTimeout
 	}
 	if o.Listen == nil {
 		o.Listen = dns.Listen
@@ -162,9 +171,7 @@ func (d *Daemon) startDNS(ctx context.Context) {
 			d.mu.Unlock()
 			d.log.Error("dns: resolver stopped", "err", err)
 			// The OS must not keep routing .thawr to a dead listener.
-			undoCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-			defer cancel()
-			d.unregisterDNS(undoCtx)
+			d.unregisterDNS(ctx)
 		}
 	}()
 	d.log.Info("dns: serving zone", "zone", dns.Zone, "listen", addr.String())
@@ -187,7 +194,9 @@ func (d *Daemon) dnsServerOptions() dns.Options {
 // netmap. Nothing is registered while the resolver is not bound (the
 // OS would route .thawr into a void); a failed registration is retried
 // with the next netmap. regMu serialises registration, update and
-// removal: apply runs from the sync loop and from a key rotation.
+// removal (apply runs from the sync loop and from a key rotation), and
+// every registrar call is bounded by OpTimeout so a hanging tool never
+// holds the lock for long.
 func (d *Daemon) registerDNS(ctx context.Context) {
 	o := d.opts.DNS
 	if o.Mode != DNSOn || o.Registrar == nil {
@@ -202,10 +211,14 @@ func (d *Daemon) registerDNS(ctx context.Context) {
 		return
 	}
 	if !registered {
-		if err := o.Registrar.Unregister(ctx, d.iface()); err != nil {
+		if err := d.registrarCall(ctx, func(c context.Context) error { return o.Registrar.Unregister(c, d.iface()) }); err != nil {
 			d.log.Debug("dns: clearing previous registration", "err", err)
 		}
-		method, err := o.Registrar.Register(ctx, d.iface(), d.selfIP)
+		var method string
+		err := d.registrarCall(ctx, func(c context.Context) (err error) {
+			method, err = o.Registrar.Register(c, d.iface(), d.selfIP)
+			return err
+		})
 		d.mu.Lock()
 		switch {
 		case err == nil:
@@ -228,16 +241,19 @@ func (d *Daemon) registerDNS(ctx context.Context) {
 			d.log.Info("dns: zone registered", "zone", dns.Zone, "method", method)
 		}
 	}
-	if err := o.Registrar.Update(ctx, d.dnsEntries()); err != nil {
+	entries := d.dnsEntries()
+	if err := d.registrarCall(ctx, func(c context.Context) error { return o.Registrar.Update(c, entries) }); err != nil {
 		d.log.Warn("dns: update names", "err", err)
 	}
 }
 
 // unregisterDNS undoes registerDNS: on shutdown, and when the resolver
 // stops while the daemon keeps running, so the OS never routes .thawr
-// to a dead listener. The flag is cleared only after the registrar
-// succeeded, so the deferred call at exit retries a failure.
-func (d *Daemon) unregisterDNS(ctx context.Context) {
+// to a dead listener. It waits for the lock first (the holder is bounded
+// by OpTimeout) and only then starts its own budget, detached from
+// parent so a cancelled Run still cleans up. The flag is cleared only
+// after the registrar succeeded, so a later call retries a failure.
+func (d *Daemon) unregisterDNS(parent context.Context) {
 	o := d.opts.DNS
 	if o.Registrar == nil {
 		return
@@ -250,7 +266,7 @@ func (d *Daemon) unregisterDNS(ctx context.Context) {
 	if !registered {
 		return
 	}
-	if err := o.Registrar.Unregister(ctx, d.iface()); err != nil {
+	if err := d.registrarCall(context.WithoutCancel(parent), func(c context.Context) error { return o.Registrar.Unregister(c, d.iface()) }); err != nil {
 		d.log.Warn("dns: unregister", "err", err)
 		return
 	}
@@ -258,6 +274,13 @@ func (d *Daemon) unregisterDNS(ctx context.Context) {
 	d.dns.registered = false
 	d.dns.method = dns.MethodNone
 	d.mu.Unlock()
+}
+
+// registrarCall runs one registrar operation under OpTimeout.
+func (d *Daemon) registrarCall(ctx context.Context, op func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, d.opts.DNS.OpTimeout)
+	defer cancel()
+	return op(ctx)
 }
 
 // iface is the interface name the device reports, or the configured one

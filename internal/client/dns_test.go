@@ -16,12 +16,14 @@ import (
 )
 
 // fakeRegistrar records the registrar calls in order; fail makes
-// Register fail until cleared.
+// Register fail until cleared, blockUpdate makes Update hang until its
+// context ends (a stuck resolver tool).
 type fakeRegistrar struct {
-	mu      sync.Mutex
-	calls   []string
-	entries []dns.Entry
-	fail    error
+	mu          sync.Mutex
+	calls       []string
+	entries     []dns.Entry
+	fail        error
+	blockUpdate bool
 }
 
 func (f *fakeRegistrar) setFail(err error) {
@@ -40,11 +42,16 @@ func (f *fakeRegistrar) Register(_ context.Context, iface string, server netip.A
 	return dns.MethodHosts, nil
 }
 
-func (f *fakeRegistrar) Update(_ context.Context, entries []dns.Entry) error {
+func (f *fakeRegistrar) Update(ctx context.Context, entries []dns.Entry) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "update")
 	f.entries = entries
+	block := f.blockUpdate
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -338,6 +345,37 @@ func TestDNSDeadListenerUnregisters(t *testing.T) {
 	}
 	if st.Server.State == "" {
 		t.Error("daemon gone")
+	}
+}
+
+// TestDNSCleanupNotBlockedByRegistrar: a registrar call that hangs is
+// cut off by OpTimeout, so the cleanup after a dead listener still runs
+// within a bounded time instead of queueing behind it forever.
+func TestDNSCleanupNotBlockedByRegistrar(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "a")
+	reg := &fakeRegistrar{blockUpdate: true}
+	lb := &loopbackDNS{}
+	d, _, stop := startDaemon(t, dir, func(o *DaemonOptions) {
+		o.DNS = DNSOptions{Mode: DNSOn, Registrar: reg, Listen: lb.listen, OpTimeout: 300 * time.Millisecond}
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
+	waitCalls(t, reg, "registered and updating", func(c []string) bool {
+		return len(c) >= 3 && strings.HasPrefix(c[1], "register ") && c[2] == "update"
+	})
+	// Update is now hanging under the lock; the listener dies.
+	start := time.Now()
+	lb.killTCP()
+	waitCalls(t, reg, "unregister despite a hanging update", func(c []string) bool {
+		return c[len(c)-1] == "unregister thawr0"
+	})
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("cleanup took %s behind a hanging registrar call", d)
+	}
+	if st := d.Status(context.Background()); st.DNS == nil || st.DNS.Method != dns.MethodNone {
+		t.Errorf("status after cleanup: %+v", st.DNS)
 	}
 }
 
