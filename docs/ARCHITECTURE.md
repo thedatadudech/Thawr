@@ -94,6 +94,7 @@ flowchart TD
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
 | `internal/svc` | Register the binary as a system service: render systemd units and launchd plists, drive `systemctl`/`launchctl` through an injected runner, create Windows services via x/sys | `New(Options) (Manager, error)`, `Manager.Install/Start/Stop/Uninstall/Status/Logs`, `RenderSystemdUnit`, `RenderLaunchdPlist` | `golang.org/x/sys/windows/svc` |
+| `internal/dns` | Serve the `thawr` zone from an injected `Source` (A and PTR, NXDOMAIN, REFUSED or forwarding outside the zone), and route the zone to the resolver per platform | `NewServer(Options)`, `Server.Handle/Serve`, `Listen`, `Source`, `Registrar`, `NewRegistrar(RegistrarOptions)` | `golang.org/x/net/dns/dnsmessage` |
 | `cmd/thawr` | Flags, config, dependency wiring, signal handling, install commands | `main` | all of the above |
 
 Interfaces are declared in the consuming package. `control` declares the
@@ -366,6 +367,38 @@ the hub and every netmap on the next generation. The threat model
 records that the server sees plaintext for static peers only (T4);
 the CLI and the UI say so wherever the config is shown. Spec 008.
 
+### 4.8 Names
+
+Every peer is `<name>.thawr`; `hub.thawr` is the server's hub address.
+Peer names are unique DNS labels since enrollment (spec 002), so the
+zone needs no extra data: the client's `Daemon` implements
+`dns.Source` over its current netmap (self, hub, visible peers) and
+binds `<self ip>:53` UDP and TCP after the interface has its address.
+Once the first netmap is applied it asks the platform registrar
+(`internal/dns`) to route the zone there: `resolvectl dns/domain
+~thawr/default-route false` where systemd-resolved runs, a
+`# thawr begin/end` block in `/etc/hosts` otherwise (rewritten
+atomically on every netmap), `/etc/resolver/thawr` on macOS, an NRPT
+rule on Windows; the daemon unregisters on exit and before registering,
+so a crash leaves nothing behind. `--dns serve` skips registration,
+`--dns off` skips everything; a bind failure is shown in
+`client status`, never fatal. Answers carry a 30 s TTL; names outside
+the zone are REFUSED, since the OS only routes `.thawr` to the client
+resolver.
+
+The server binds the same resolver on the hub address
+(`dns.enabled`, default true) with a `Source` over the peer registry,
+cached per hub generation, that answers a requesting overlay address
+only with peers the policy makes visible to it (the same `Visibility`
+that decides key distribution) plus the hub. The phone config carries
+`DNS = <hub ip>, thawr`; because the WireGuard app then sends every
+query through the tunnel, the hub resolver forwards names outside the
+zone to `dns.upstream` or, when empty, the nameservers of the host's
+`/etc/resolv.conf` read at start, over the transport the query arrived
+on, first answer wins, no cache. Both resolvers drop queries from
+outside the overlay and listen on overlay addresses only, so neither is
+reachable from the internet. Spec 010.
+
 ## 5. Wire interfaces
 
 ### gRPC `thawr.v1.Control`
@@ -406,7 +439,10 @@ answer with the settled path).
 
 `GET /status` returns the document described by `docs/status.schema.json`:
 `version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
-`hub`, `peers[]`, `retrieved_at`. Fields are only ever added.
+`dns`, `hub`, `peers[]`, `retrieved_at`. Fields are only ever added.
+`dns{listen, state, method, names, error}` describes the client's
+resolver (`state` `serving` or `error`; `method` `resolved`, `hosts`,
+`resolver-file`, `nrpt` or `none`) and is absent with `--dns off`.
 `server.state` is `connected`, `reconnecting` (no netmap at all) or
 `cached` (running on the last netmap while the server is unreachable),
 with `attempt`, `next_retry_at` and `unreachable_since` alongside;
@@ -463,7 +499,7 @@ long as endpoints have not changed.
 | `google.golang.org/grpc`, `google.golang.org/protobuf` | Control channel | Apache-2.0, BSD-3-Clause |
 | `gopkg.in/yaml.v3` | Config and policy | MIT and Apache-2.0 |
 | `golang.org/x/crypto` | argon2id password hashing | BSD-3-Clause |
-| `golang.org/x/net`, `golang.org/x/sys` | Routing tables, syscalls, Windows service control manager (`windows/svc`) | BSD-3-Clause |
+| `golang.org/x/net`, `golang.org/x/sys` | DNS message codec (`dns/dnsmessage`), routing tables, syscalls, Windows service control manager (`windows/svc`) | BSD-3-Clause |
 | `github.com/vishvananda/netlink` | Linux addresses and routes | Apache-2.0 |
 | `github.com/google/nftables` | Linux receiver-side filter | Apache-2.0 |
 | `tailscale.com/net/stun` (copied into `internal/stun` with license header) | STUN client and server codec | BSD-3-Clause |

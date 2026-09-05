@@ -121,9 +121,24 @@ hub           100.64.0.1    server   -       direct vpn.example.com:51820   25s 
 Filter: 3 rules · 0 dropped (last 5 min)
 ```
 
+Every peer has a name: `ssh nas.thawr`, `curl http://build-box.thawr:8000`,
+`ping alice-laptop.thawr`. The client serves the `thawr` zone on its
+own overlay address from the netmap it already has, so names work
+exactly when the tunnel works and nothing outside the network is asked.
+It tells the OS to send `.thawr` queries there (systemd-resolved, a
+managed block in `/etc/hosts` where resolved is absent, a resolver file
+on macOS, an NRPT rule on Windows) and undoes that on `client down`.
+`--dns serve` keeps the resolver without touching the system
+configuration, `--dns off` disables it; `client status` shows which.
+
 Phones join with the official WireGuard app: `thawr admin peer add-mobile
 --owner markus --name markus-phone` prints a QR code to scan (once; the
-server keeps only the public key). Phone traffic goes through the
+server keeps only the public key). The config points the phone at the
+hub's resolver, so names work there too; because the app then sends
+every DNS query through the tunnel, the server forwards anything
+outside `.thawr` to its own resolvers (`dns.upstream`, or the host's
+`/etc/resolv.conf`). A phone learns only the names of peers the policy
+lets it reach. Phone traffic goes through the
 server's hub, so the server can read it, unlike the end-to-end tunnels
 between laptops and servers; see the threat model.
 
@@ -138,7 +153,9 @@ end-to-end encrypted, and the path upgrades to `direct` on its own when
 the network allows it.
 
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
-(STUN), UDP 51820 (WireGuard hub for phones). When 443 is taken (a
+(STUN), UDP 51820 (WireGuard hub for phones), UDP and TCP 53 on the hub
+address only (`100.64.0.1`, reachable through WireGuard, never from the
+internet). When 443 is taken (a
 reverse proxy, Docker, CapRover) set `listen: {https: ":8443"}` and
 `public_addr: vpn.example.com:8443` in `server.yaml`; the server
 opens the host's forward chain for the hub interface itself, also on

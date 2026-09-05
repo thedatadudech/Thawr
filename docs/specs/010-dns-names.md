@@ -71,7 +71,8 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:
   makes visible to that peer (the same `Visibility` that decides key
   distribution), plus `hub.thawr`. A name therefore discloses nothing a
   key would not (threat model A7).
-- Queries from a source outside the overlay prefix are dropped. Both
+- Queries from a source outside the overlay prefix are dropped; the
+  local host (a loopback source) is always answered. Both
   resolvers listen on overlay addresses only, which are reachable only
   through WireGuard; neither is an open resolver.
 
@@ -93,9 +94,9 @@ type Options struct {
     Logger    *slog.Logger
 }
 func NewServer(o Options) *Server
-func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr) ([]byte, error)
+func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bool) ([]byte, error)
 func (s *Server) Serve(ctx context.Context, udp net.PacketConn, tcp net.Listener) error
-func Listen(addr netip.AddrPort) (net.PacketConn, net.Listener, error)
+func Listen(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Listener, error)
 ```
 
 - Wire codec: `golang.org/x/net/dns/dnsmessage` (BSD-3, pure Go,
@@ -127,8 +128,9 @@ func Listen(addr netip.AddrPort) (net.PacketConn, net.Listener, error)
     <iface> false`; unregister is `resolvectl revert <iface>`.
     Method `resolved`.
   - Linux otherwise: a block in `/etc/hosts` between `# thawr begin`
-    and `# thawr end` with one line per peer, `<ip> <name>.thawr
-    <name>`, hub included. The file is rewritten atomically (temp
+    and `# thawr end` with one line per peer, `<ip> <name>.thawr`,
+    hub included (only the zone name, so a peer never shadows a LAN
+    host of the same bare name). The file is rewritten atomically (temp
     file in the same directory, same mode, rename) on every netmap;
     all other lines are preserved byte for byte; unregister removes
     the block. Method `hosts`.
@@ -196,33 +198,33 @@ dependency row), THREAT_MODEL (A7: names follow visibility), TESTING
 
 ## Acceptance criteria
 
-- [ ] With two enrolled clients A and B, `getent hosts b.thawr` on A
+- [x] With two enrolled clients A and B, `getent hosts b.thawr` on A
       (or a Go resolver pointed at A's overlay address) returns B's
       overlay IPv4 within one netmap generation of B's enrollment, and
       stops resolving (NXDOMAIN) after `thawr admin peer remove b`.
-- [ ] `dig -x 100.64.0.1 @<self ip>` answers `hub.thawr.`; AAAA for a
+- [x] `dig -x 100.64.0.1 @<self ip>` answers `hub.thawr.`; AAAA for a
       known name is NOERROR without records; `example.com` at the
       client resolver is REFUSED.
-- [ ] Linux with systemd-resolved: `resolvectl status <iface>` shows
+- [x] Linux with systemd-resolved: `resolvectl status <iface>` shows
       the DNS server and the `~thawr` routing domain after `client up`
       and nothing after `client down`. Linux without it: `/etc/hosts`
       carries the block with every peer, and only that block changes;
       `client down` removes it and leaves the rest byte-identical.
-- [ ] macOS: `scutil --dns` lists the `thawr` resolver after `client
+- [x] macOS: `scutil --dns` lists the `thawr` resolver after `client
       up`; `/etc/resolver/thawr` is gone after `client down` (manual
       checklist).
-- [ ] `client status` shows `DNS: .thawr via <method>` and `--json`
+- [x] `client status` shows `DNS: .thawr via <method>` and `--json`
       validates against `docs/status.schema.json` with the `dns`
       object; `--dns off` omits it.
-- [ ] A phone joined with a QR from a `dns.enabled` server resolves a
+- [x] A phone joined with a QR from a `dns.enabled` server resolves a
       peer the policy lets it reach through `100.64.0.1`, gets NXDOMAIN
       for a peer the policy hides, and resolves an internet name
       through the server's upstream (integration test with a fake
       upstream; manual on a real phone).
-- [ ] A query from an address outside the overlay to either resolver
+- [x] A query from an address outside the overlay to either resolver
       gets no answer.
-- [ ] `client ping nas.thawr` behaves like `client ping nas`.
-- [ ] `--dns serve` binds and answers but leaves `/etc` untouched.
+- [x] `client ping nas.thawr` behaves like `client ping nas`.
+- [x] `--dns serve` binds and answers but leaves `/etc` untouched.
 
 ## Test cases
 
