@@ -25,23 +25,53 @@ type mobileMesh struct {
 	clients          []*netns
 	status           func(i int) clientStatus
 	admin            func(args ...string) ([]byte, error)
+	// phoneDNS is the DNS line the exported phone config carried.
+	phoneDNS string
+}
+
+// stripDNSLine removes the "DNS = ..." line from a WireGuard config and
+// returns it.
+func stripDNSLine(conf string) (dnsLine, rest string) {
+	var kept []string
+	for _, line := range strings.Split(conf, "\n") {
+		if strings.HasPrefix(line, "DNS = ") {
+			dnsLine = line
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return dnsLine, strings.Join(kept, "\n")
 }
 
 func newMobileMesh(t *testing.T, policy string) *mobileMesh {
 	t.Helper()
+	return newStarMesh(t, policy, true)
+}
+
+// newStarMesh is newMobileMesh with the phone optional: without it only
+// root and iproute2 are needed (spec 010's client resolver test).
+func newStarMesh(t *testing.T, policy string, withPhone bool) *mobileMesh {
+	t.Helper()
 	requireNetns(t)
-	for _, tool := range []string{"wg-quick", "nc"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s not found", tool)
+	if withPhone {
+		for _, tool := range []string{"wg-quick", "nc"} {
+			if _, err := exec.LookPath(tool); err != nil {
+				t.Skipf("%s not found", tool)
+			}
 		}
 	}
 	bin := thawrBinary(t)
 	dir := shortTempDir(t)
 	srvNs := newNetns(t, "srv")
 	clients := []*netns{newNetns(t, "c1"), newNetns(t, "c2")}
-	phone := newNetns(t, "ph")
+	var phone *netns
+	nodes := clients
+	if withPhone {
+		phone = newNetns(t, "ph")
+		nodes = append(nodes, phone)
+	}
 	srvNs.ip(t, "sysctl", "-w", "net.ipv4.ip_forward=1")
-	for i, ns := range append(clients, phone) {
+	for i, ns := range nodes {
 		veth := "v" + string(rune('a'+i))
 		sub := "10.9." + string(rune('0'+i))
 		ip(t, "link", "add", veth+"s", "type", "veth", "peer", "name", veth+"c")
@@ -92,7 +122,7 @@ func newMobileMesh(t *testing.T, policy string) *mobileMesh {
 			t.Fatal(err)
 		}
 		name := owner + "-box"
-		d := ns.cmd(ctx, bin, "client", "up", "--server", "https://10.9."+string(rune('0'+i))+".1:8443", "--token", tok.Secret,
+		d := ns.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", "https://10.9."+string(rune('0'+i))+".1:8443", "--token", tok.Secret,
 			"--fingerprint", fingerprint, "--state-dir", filepath.Join(dir, name), "--socket", filepath.Join(dir, name+".sock"), "--name", name)
 		d.Stdout, d.Stderr = testWriter{t, name}, testWriter{t, name}
 		if err := d.Start(); err != nil {
@@ -122,6 +152,9 @@ func newMobileMesh(t *testing.T, policy string) *mobileMesh {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	if !withPhone {
+		return m
+	}
 	// The phone: export the config for alice and bring it up with
 	// wg-quick. public_addr is 0.0.0.0 in this harness, so the endpoint
 	// is rewritten to the server's address on the phone's link.
@@ -140,6 +173,9 @@ func newMobileMesh(t *testing.T, policy string) *mobileMesh {
 	if fixed == string(raw) {
 		t.Fatalf("unexpected endpoint in exported config:\n%s", raw)
 	}
+	// wg-quick would hand the DNS line to resolvconf, which the harness
+	// host may not have; the DNS test queries the hub resolver directly.
+	m.phoneDNS, fixed = stripDNSLine(fixed)
 	writeFile(t, conf, fixed)
 	if out, err := phone.cmd(ctx, "wg-quick", "up", conf).CombinedOutput(); err != nil {
 		t.Fatalf("wg-quick up: %v\n%s", err, out)

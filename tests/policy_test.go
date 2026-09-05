@@ -80,7 +80,7 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		name := owner + "-box"
-		d := ns.cmd(ctx, bin, "client", "up", "--server", "https://10.9."+string(rune('0'+i))+".1:8443", "--token", tok.Secret,
+		d := ns.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", "https://10.9."+string(rune('0'+i))+".1:8443", "--token", tok.Secret,
 			"--fingerprint", fingerprint, "--state-dir", filepath.Join(dir, name), "--socket", filepath.Join(dir, name+".sock"), "--name", name)
 		d.Stdout, d.Stderr = testWriter{t, name}, testWriter{t, name}
 		if err := d.Start(); err != nil {
