@@ -162,6 +162,7 @@ func (s *controlServer) Sync(req *thawrv1.SyncRequest, stream grpc.ServerStreami
 		}
 		msg := netMapToProto(nm)
 		msg.Keepalive = isKeepalive
+		msg.ServerVersion = s.deps.Version
 		if err := stream.Send(msg); err != nil {
 			return err
 		}

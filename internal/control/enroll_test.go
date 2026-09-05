@@ -324,3 +324,29 @@ func TestRegistry(t *testing.T) {
 		t.Errorf("member delete: %v", err)
 	}
 }
+
+func TestCheckVersionPrefixes(t *testing.T) {
+	for _, tc := range []struct {
+		client, minimum string
+		ok              bool
+	}{
+		{"v0.2.0", "0.2", true}, {"0.2.0", "0.2", true}, {"v0.1.9", "0.2", false}, {"0.1.9-3-gabc", "0.2", false},
+		{"dev", "0.2", true}, {"v1.0.0", "0.9", true}, {"v0.9.9", "1.0", false}, {"0.3.0", "", true},
+	} {
+		err := checkVersion(tc.client, tc.minimum)
+		if tc.ok != (err == nil) {
+			t.Errorf("checkVersion(%q, %q) = %v, want ok=%v", tc.client, tc.minimum, err, tc.ok)
+		}
+	}
+	for _, tc := range []struct {
+		server, client string
+		newer          bool
+	}{
+		{"v0.2.0", "0.1.0", true}, {"v0.2.0", "v0.2.5", false}, {"1.0.0", "0.9.9", true}, {"v0.1.0-rc1", "v0.1.0", false},
+		{"dev", "0.1.0", false}, {"v0.2.0", "dev", false}, {"", "0.1.0", false},
+	} {
+		if got := NewerMajorMinor(tc.server, tc.client); got != tc.newer {
+			t.Errorf("NewerMajorMinor(%q, %q) = %v, want %v", tc.server, tc.client, got, tc.newer)
+		}
+	}
+}

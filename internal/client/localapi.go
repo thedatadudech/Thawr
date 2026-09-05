@@ -64,6 +64,9 @@ type ServerStatus struct {
 	Generation       int64      `json:"generation"`
 	LastMessageAt    *time.Time `json:"last_message_at"`
 	LastError        string     `json:"last_error"`
+	// Version is the server's own version from the last netmap; empty
+	// until one arrived.
+	Version string `json:"version"`
 }
 
 // WGStatus describes the local WireGuard interface.
@@ -186,6 +189,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	}
 	st.Self.Kind = nm.SelfKind
 	st.Server.Generation = nm.Generation
+	st.Server.Version = nm.ServerVersion
 	if st.Server.LastMessageAt == nil && !nm.ReceivedAt.IsZero() {
 		st.Server.LastMessageAt = timePtr(nm.ReceivedAt)
 	}

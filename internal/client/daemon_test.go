@@ -84,7 +84,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	builder := control.NewNetMapBuilder(st, cpo.visibility, endpoints, hub, hubCfg, hub.Generation)
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller: enroller, Hub: api.HubInfo{PublicKey: hubCfg.PublicKey, Endpoint: hubCfg.Endpoint, Overlay: overlay}, Logger: quiet,
-		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths,
+		NodeAuth: registry, NetMaps: builder, Sync: hub, Peers: registry, Endpoints: endpoints, Paths: paths, Version: "v0.9.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestDaemonSyncAppliesAndCaches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if st.Server.State != ServerConnected || st.Self.Name != "a" || st.Self.Kind != "human" || len(st.Peers) != 1 || st.Peers[0].Name != "b" || st.Hub == nil || st.WireGuard.Backend != "fake" {
+	if st.Server.State != ServerConnected || st.Self.Name != "a" || st.Self.Kind != "human" || len(st.Peers) != 1 || st.Peers[0].Name != "b" || st.Hub == nil || st.WireGuard.Backend != "fake" || st.Server.Version != "v0.9.0" {
 		t.Errorf("status: %+v", st)
 	}
 

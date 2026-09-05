@@ -22,7 +22,7 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["addr", "state", "attempt", "next_retry_at", "unreachable_since", "generation", "last_message_at", "last_error"],
+      "required": ["addr", "state", "attempt", "next_retry_at", "unreachable_since", "generation", "last_message_at", "last_error", "version"],
       "properties": {
         "addr": { "type": "string", "description": "host:port of the control server." },
         "state": { "type": "string", "enum": ["connected", "reconnecting", "cached"] },
@@ -31,7 +31,8 @@
         "unreachable_since": { "$ref": "#/$defs/nullableTime" },
         "generation": { "type": "integer", "minimum": 0, "description": "Netmap generation in use; 0 when none." },
         "last_message_at": { "$ref": "#/$defs/nullableTime" },
-        "last_error": { "type": "string" }
+        "last_error": { "type": "string" },
+        "version": { "type": "string", "description": "The server's version from the last netmap; empty until one arrived." }
       }
     },
     "wireguard": {

@@ -10,8 +10,13 @@ import (
 	"os"
 )
 
-// version is set at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// version, commit and builtAt are set at build time via -ldflags
+// "-X main.version=..."; `thawr version` falls back to Go's VCS stamp.
+var (
+	version = "dev"
+	commit  string
+	builtAt string
+)
 
 func main() {
 	if err := newRootCmd(os.Stdout, os.Stderr).ExecuteContext(context.Background()); err != nil {

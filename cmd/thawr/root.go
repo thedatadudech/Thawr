@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -24,17 +23,6 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	})
 	root.AddCommand(newServerCmd(), newClientCmd(), newAdminCmd(), newVersionCmd())
 	return root
-}
-
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "thawr %s\n", version)
-			return err
-		},
-	}
 }
 
 // usageArgs turns a positional-argument error into exit code 2.
