@@ -189,7 +189,7 @@ func TestClientInstallEnrolsBeforeWritingUnit(t *testing.T) {
 			t.Errorf("service args carry %q: %s", bad, joined)
 		}
 	}
-	for _, want := range []string{"client up", "--state-dir " + stateDir, "--socket " + sock, "--interface utun", "--log-level info"} {
+	for _, want := range []string{"client up", "--state-dir " + stateDir, "--socket " + sock, "--interface utun", "--log-level info", "--dns on"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("service args lack %q: %s", want, joined)
 		}

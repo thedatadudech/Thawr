@@ -178,6 +178,11 @@ func TestHandleDropsForeignSource(t *testing.T) {
 	if resp, _ := s.Handle(context.Background(), []byte{1, 2, 3}, netip.MustParseAddr("100.64.0.2"), false); resp != nil {
 		t.Fatalf("garbage answered: %v", resp)
 	}
+	// The local host may always ask.
+	resp, err = s.Handle(context.Background(), mkQuery(t, 2, "nas.thawr.", dnsmessage.TypeA, false), netip.MustParseAddr("127.0.0.1"), false)
+	if err != nil || resp == nil {
+		t.Fatalf("loopback dropped: %v %v", resp, err)
+	}
 }
 
 func TestHandleRejectsNonQuery(t *testing.T) {

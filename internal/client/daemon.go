@@ -23,6 +23,7 @@ import (
 	thawrv1 "github.com/thedatadudech/thawr/internal/api/proto/thawr/v1"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/path"
+	"github.com/thedatadudech/thawr/internal/dns"
 	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
@@ -63,6 +64,8 @@ type DaemonOptions struct {
 	// Relay tunes the relay client's timing; server, credentials and
 	// port always come from the enrollment state.
 	Relay relay.ClientOptions
+	// DNS configures the <name>.thawr resolver (spec 010).
+	DNS DNSOptions
 }
 
 func (o DaemonOptions) withDefaults() DaemonOptions {
@@ -118,6 +121,10 @@ func (o DaemonOptions) withDefaults() DaemonOptions {
 		o.Trigger = triggerUDP
 	}
 	o.Path.Relay = true
+	o.DNS = o.DNS.withDefaults()
+	if o.DNS.Registrar == nil && o.DNS.Mode == DNSOn {
+		o.DNS.Registrar = dns.NewRegistrar(dns.RegistrarOptions{Logger: o.Logger})
+	}
 	return o
 }
 
@@ -144,6 +151,8 @@ type Daemon struct {
 
 	// drops samples the filter's drop counter for the 5-minute window.
 	drops *dropWindow
+	// dns is the resolver's state (guarded by mu).
+	dns dnsState
 
 	mu        sync.Mutex
 	key       wg.Key
@@ -169,6 +178,12 @@ type Daemon struct {
 // ErrNotEnrolled when the device has not enrolled.
 func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	opts = opts.withDefaults()
+	if !ValidDNSMode(opts.DNS.Mode) {
+		return nil, fmt.Errorf("client: dns mode %q is not on, serve or off", opts.DNS.Mode)
+	}
+	if err := validatePort(opts.DNS.Port); err != nil {
+		return nil, err
+	}
 	st, err := LoadState(opts.StateDir)
 	if err != nil {
 		return nil, err
@@ -256,6 +271,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return err
 		}
 	}
+	d.startDNS(ctx)
 
 	srv, ln, err := d.listenLocal(ctx)
 	if err != nil {
@@ -278,6 +294,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelShutdown()
+	d.unregisterDNS(shutdownCtx)
 	_ = srv.Shutdown(shutdownCtx)
 	_ = os.Remove(d.opts.Socket)
 	d.log.Info("client stopped")
@@ -417,6 +434,7 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 			d.log.Warn("cache netmap", "err", err)
 		}
 	}
+	d.registerDNS(ctx)
 	d.log.Debug("netmap applied", "generation", nm.Generation, "peers", len(nm.Peers))
 	select {
 	case d.mapCh <- nm:

@@ -247,7 +247,7 @@ type query struct {
 // outside Allow, or garbage). tcp selects the transport for size limits
 // and forwarding.
 func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bool) ([]byte, error) {
-	if s.opts.Allow.IsValid() && (!from.IsValid() || !s.opts.Allow.Contains(from)) {
+	if !s.allowed(from) {
 		return nil, nil
 	}
 	q, err := parseQuery(req)
@@ -279,6 +279,15 @@ func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bo
 		return s.respond(q, dnsmessage.RCodeServerFailure, nil, tcp)
 	}
 	return resp, nil
+}
+
+// allowed accepts sources inside Allow and the local host itself (a
+// query to our own overlay address from a loopback socket).
+func (s *Server) allowed(from netip.Addr) bool {
+	if !s.opts.Allow.IsValid() {
+		return true
+	}
+	return from.IsValid() && (from.IsLoopback() || s.opts.Allow.Contains(from))
 }
 
 func parseQuery(req []byte) (query, error) {

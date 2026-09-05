@@ -75,6 +75,19 @@
         "flows": { "type": "integer", "minimum": 0 }
       }
     },
+    "dns": {
+      "type": "object",
+      "description": "The <name>.thawr resolver; absent when the client runs with --dns off.",
+      "additionalProperties": false,
+      "required": ["listen", "state", "method", "names", "error"],
+      "properties": {
+        "listen": { "type": "string", "description": "ip:port the resolver listens on." },
+        "state": { "type": "string", "enum": ["serving", "error"] },
+        "method": { "type": "string", "enum": ["resolved", "hosts", "resolver-file", "nrpt", "none"], "description": "How the OS was told about the zone; none when not registered." },
+        "names": { "type": "integer", "minimum": 0 },
+        "error": { "type": "string" }
+      }
+    },
     "hub": { "$ref": "#/$defs/peer" },
     "peers": { "type": "array", "items": { "$ref": "#/$defs/peer" } },
     "retrieved_at": { "type": "string", "format": "date-time" }
