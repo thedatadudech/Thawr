@@ -37,7 +37,7 @@ in the pull request.
 
 ### macOS (`utun`)
 
-1. `sudo thawr client up --interface utun ...`; the log shows the
+1. `sudo thawr client up ...` (the interface defaults to `utun` on macOS); the log shows the
    assigned `utunN`.
 2. `ifconfig utunN` shows the overlay address; `netstat -rn` has a route
    for the overlay prefix over `utunN`.

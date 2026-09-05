@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"runtime"
 )
 
 // Config is the complete server configuration. Every field has a default
@@ -75,6 +76,16 @@ const (
 // DefaultDataDir is used when data_dir is not set.
 const DefaultDataDir = "/var/lib/thawr"
 
+// DefaultInterface is the WireGuard interface name used when none is
+// configured: thawr0, except on macOS, which only accepts utun names and
+// assigns the number itself.
+func DefaultInterface() string {
+	if runtime.GOOS == "darwin" {
+		return "utun"
+	}
+	return "thawr0"
+}
+
 // Default returns a Config with every default applied and PublicAddr
 // empty. Validate fails on it until PublicAddr is set.
 func Default() *Config {
@@ -87,7 +98,7 @@ func Default() *Config {
 		},
 		Overlay: Overlay{
 			CIDR:      "100.64.0.0/10",
-			Interface: "thawr0",
+			Interface: DefaultInterface(),
 		},
 		TLS:         TLS{Mode: TLSModeSelfSigned},
 		PolicyFile:  "/etc/thawr/policy.yaml",

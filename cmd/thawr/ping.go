@@ -27,8 +27,8 @@ type pingOptions struct {
 // runPing asks the daemon to establish a path to the peer (which
 // forces probing on an idle one), prints every path change it sees,
 // sends count ICMP echoes with the system ping and ends with the
-// settled path. Exit 0 needs a usable path (direct or relay) and, when
-// echoes were sent, at least one reply.
+// settled path. Exit 0 needs a usable path (direct, relay or via the
+// hub) and, when echoes were sent, at least one reply.
 func runPing(ctx context.Context, out, errOut io.Writer, o pingOptions) error {
 	lc := client.NewLocalClient(o.socket)
 	before, err := lc.Status(ctx)
@@ -80,7 +80,7 @@ func runPing(ctx context.Context, out, errOut io.Writer, o pingOptions) error {
 			return err
 		}
 	}
-	if state != "direct" && state != "relay" {
+	if state != "direct" && state != "relay" && state != client.PathHub {
 		return &exitError{code: exitNotConnected, err: fmt.Errorf("no path to %s (%s)", o.peer, dash(state))}
 	}
 	if !replied {

@@ -38,7 +38,7 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
 	cmd.Flags().BoolVar(&f.acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
 	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
-	cmd.Flags().StringVar(&f.iface, "interface", "thawr0", "WireGuard interface name (macOS: utun)")
+	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
 }
 

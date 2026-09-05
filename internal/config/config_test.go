@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,7 @@ func TestDefaults(t *testing.T) {
 		{"listen.stun", strings.Join(cfg.Listen.STUN, ","), strings.Join(want.Listen.STUN, ",")},
 		{"overlay.cidr", cfg.Overlay.CIDR, want.Overlay.CIDR},
 		{"overlay.interface", cfg.Overlay.Interface, want.Overlay.Interface},
+		{"overlay.interface default", DefaultInterface(), map[bool]string{true: "utun", false: "thawr0"}[runtime.GOOS == "darwin"]},
 		{"tls.mode", cfg.TLS.Mode, TLSModeSelfSigned},
 		{"policy_file", cfg.PolicyFile, want.PolicyFile},
 		{"admin_socket", cfg.AdminSocket, filepath.Join(DefaultDataDir, "admin.sock")},
