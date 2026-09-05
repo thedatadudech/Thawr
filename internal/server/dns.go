@@ -136,11 +136,18 @@ func (s *Server) startDNS(ctx context.Context) (stop func(), err error) {
 	srv := dns.NewServer(dns.Options{Source: s.dnsSource, Upstreams: upstreams, Allow: s.cfg.OverlayPrefix(), Logger: s.log})
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	listen := addr.String()
+	s.dnsListen.Store(&listen)
 	go func() {
 		defer close(done)
-		_ = srv.Serve(serveCtx, udp, tcp)
+		if err := srv.Serve(serveCtx, udp, tcp); err != nil {
+			// A listener died underneath us: stop advertising the
+			// resolver in status; the operator sees the error in the log.
+			empty := ""
+			s.dnsListen.Store(&empty)
+			s.log.Error("dns: hub resolver stopped", "listen", listen, "err", err)
+		}
 	}()
-	s.dnsListen = addr.String()
 	ups := make([]string, 0, len(upstreams))
 	for _, u := range upstreams {
 		ups = append(ups, u.String())

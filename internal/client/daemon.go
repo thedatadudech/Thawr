@@ -272,6 +272,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 	d.startDNS(ctx)
+	defer func() {
+		// The registration outlives ctx; give the undo its own budget so
+		// an early exit (a failed local socket, say) never leaves the OS
+		// routing .thawr to a resolver that is gone.
+		undoCtx, cancelUndo := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelUndo()
+		d.unregisterDNS(undoCtx)
+	}()
 
 	srv, ln, err := d.listenLocal(ctx)
 	if err != nil {
@@ -294,7 +302,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelShutdown()
-	d.unregisterDNS(shutdownCtx)
 	_ = srv.Shutdown(shutdownCtx)
 	_ = os.Remove(d.opts.Socket)
 	d.log.Info("client stopped")

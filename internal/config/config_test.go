@@ -96,6 +96,7 @@ func TestValidate(t *testing.T) {
 		{"bad min version", "public_addr: a\nmin_client_version: v1\n", []string{"min_client_version"}},
 		{"unknown key", "public_addr: a\nbogus: 1\n", []string{"bogus"}},
 		{"bad dns upstream", "public_addr: a\ndns:\n  upstream: ['1.1.1.1', 'dns.example']\n", []string{"dns.upstream[1]"}},
+		{"dns upstream port zero", "public_addr: a\ndns:\n  upstream: ['1.1.1.1:0']\n", []string{"dns.upstream[0]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

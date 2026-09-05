@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"sync"
 )
 
 // linuxRegistrar uses systemd-resolved when it runs and the hosts file
 // otherwise. The choice is made at Register; Unregister clears both so
-// a host that changed resolver setups between runs is left clean.
+// a host that changed resolver setups between runs is left clean. The
+// daemon may call it from the sync loop and from a key rotation at the
+// same time, so the choice is guarded.
 type linuxRegistrar struct {
 	resolved *resolved
 	hosts    *hostsFile
-	active   Registrar
+
+	mu     sync.Mutex
+	active Registrar
 }
 
 func newLinuxRegistrar(o RegistrarOptions) *linuxRegistrar {
@@ -20,19 +25,24 @@ func newLinuxRegistrar(o RegistrarOptions) *linuxRegistrar {
 }
 
 func (l *linuxRegistrar) Register(ctx context.Context, iface string, server netip.Addr) (string, error) {
+	var active Registrar = l.hosts
 	if l.resolved.available() {
-		l.active = l.resolved
-	} else {
-		l.active = l.hosts
+		active = l.resolved
 	}
-	return l.active.Register(ctx, iface, server)
+	l.mu.Lock()
+	l.active = active
+	l.mu.Unlock()
+	return active.Register(ctx, iface, server)
 }
 
 func (l *linuxRegistrar) Update(ctx context.Context, entries []Entry) error {
-	if l.active == nil {
+	l.mu.Lock()
+	active := l.active
+	l.mu.Unlock()
+	if active == nil {
 		return nil
 	}
-	return l.active.Update(ctx, entries)
+	return active.Update(ctx, entries)
 }
 
 func (l *linuxRegistrar) Unregister(ctx context.Context, iface string) error {
@@ -45,6 +55,8 @@ func (l *linuxRegistrar) Unregister(ctx context.Context, iface string) error {
 	if err := l.hosts.Unregister(ctx, iface); err != nil {
 		errs = append(errs, err)
 	}
+	l.mu.Lock()
 	l.active = nil
+	l.mu.Unlock()
 	return errors.Join(errs...)
 }

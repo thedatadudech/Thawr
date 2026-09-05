@@ -137,6 +137,12 @@ func spliceHostsBlock(data []byte, block string) ([]byte, bool) {
 			}
 		}
 	}
+	// A begin marker without its end marker is a truncated block (an
+	// interrupted write, a hand edit): it runs to the end of the file,
+	// so it is replaced or removed instead of accumulating.
+	if start >= 0 && end < 0 {
+		end = len(lines) - 1
+	}
 	var out bytes.Buffer
 	switch {
 	case start >= 0 && end >= start:

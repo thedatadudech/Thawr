@@ -32,6 +32,12 @@ func (r *resolved) Register(ctx context.Context, iface string, server netip.Addr
 	}
 	for _, args := range steps {
 		if _, err := r.opts.Runner(ctx, "resolvectl", args...); err != nil {
+			// An interface with a DNS server but no routing domain would
+			// receive every query and get REFUSED for all of them: leave
+			// no partial configuration behind.
+			if rerr := r.Unregister(ctx, iface); rerr != nil {
+				return MethodResolved, fmt.Errorf("dns: resolvectl %s: %w (revert failed too: %w)", args[0], err, rerr)
+			}
 			return MethodResolved, fmt.Errorf("dns: resolvectl %s: %w", args[0], err)
 		}
 	}

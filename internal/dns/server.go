@@ -29,9 +29,6 @@ const maxUDP = 512
 // maxMessage bounds any DNS message we read or build.
 const maxMessage = 65535
 
-// typeANY (QTYPE 255) has no constant in dnsmessage.
-const typeANY dnsmessage.Type = 255
-
 // Source answers name and address lookups for the peer at from. Names
 // carry no zone suffix. Unknown names and addresses return false.
 type Source interface {
@@ -49,6 +46,10 @@ type Options struct {
 	// Allow limits who is answered; queries from other addresses are
 	// dropped. The zero prefix allows everyone.
 	Allow netip.Prefix
+	// Reverse is the address range answered with PTR records; it
+	// defaults to Allow. The client sets the whole overlay here while
+	// answering only itself.
+	Reverse netip.Prefix
 	// Timeout bounds each upstream attempt (2 s).
 	Timeout time.Duration
 	Logger  *slog.Logger
@@ -60,6 +61,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Timeout == 0 {
 		o.Timeout = 2 * time.Second
+	}
+	if !o.Reverse.IsValid() {
+		o.Reverse = o.Allow
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
@@ -103,20 +107,38 @@ func Listen(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Liste
 }
 
 // Serve answers on both listeners until ctx ends, then closes them.
-// Either listener may be nil.
+// Either listener may be nil. It returns nil when ctx ended and the
+// listener's error when one of them stopped on its own, after closing
+// the other.
 func (s *Server) Serve(ctx context.Context, udp net.PacketConn, tcp net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
+	failed := make(chan error, 2)
 	if udp != nil {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.serveUDP(ctx, udp) }()
+		go func() {
+			defer wg.Done()
+			if err := s.serveUDP(ctx, udp); err != nil {
+				failed <- err
+			}
+		}()
 	}
 	if tcp != nil {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.serveTCP(ctx, tcp) }()
+		go func() {
+			defer wg.Done()
+			if err := s.serveTCP(ctx, tcp); err != nil {
+				failed <- err
+			}
+		}()
 	}
-	<-ctx.Done()
+	var err error
+	select {
+	case <-ctx.Done():
+	case err = <-failed:
+		cancel()
+	}
 	if udp != nil {
 		_ = udp.Close()
 	}
@@ -124,23 +146,23 @@ func (s *Server) Serve(ctx context.Context, udp net.PacketConn, tcp net.Listener
 		_ = tcp.Close()
 	}
 	wg.Wait()
-	return nil
+	return err
 }
 
-func (s *Server) serveUDP(ctx context.Context, conn net.PacketConn) {
+// serveUDP answers datagrams until ctx ends (nil) or the socket fails.
+func (s *Server) serveUDP(ctx context.Context, conn net.PacketConn) error {
 	buf := make([]byte, maxMessage)
 	for {
 		n, from, err := conn.ReadFrom(buf)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return nil
 			}
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
-			s.log.Warn("dns: udp read", "err", err)
-			return
+			return fmt.Errorf("dns: udp listener: %w", err)
 		}
 		req := append([]byte(nil), buf[:n]...)
 		go func() {
@@ -155,19 +177,20 @@ func (s *Server) serveUDP(ctx context.Context, conn net.PacketConn) {
 	}
 }
 
-func (s *Server) serveTCP(ctx context.Context, ln net.Listener) {
+// serveTCP accepts connections until ctx ends (nil) or the listener
+// fails.
+func (s *Server) serveTCP(ctx context.Context, ln net.Listener) error {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return nil
 			}
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
-			s.log.Warn("dns: tcp accept", "err", err)
-			return
+			return fmt.Errorf("dns: tcp listener: %w", err)
 		}
 		go s.serveConn(ctx, c)
 	}
@@ -267,7 +290,7 @@ func (s *Server) Handle(ctx context.Context, req []byte, from netip.Addr, tcp bo
 	if name == s.zone || strings.HasSuffix(name, "."+s.zone) {
 		return s.answerZone(ctx, q, from, name, tcp)
 	}
-	if addr, ok := reverseAddr(name); ok && (!s.opts.Allow.IsValid() || s.opts.Allow.Contains(addr)) {
+	if addr, ok := reverseAddr(name); ok && (!s.opts.Reverse.IsValid() || s.opts.Reverse.Contains(addr)) {
 		return s.answerReverse(ctx, q, from, addr, tcp)
 	}
 	if len(s.opts.Upstreams) == 0 {
@@ -346,7 +369,7 @@ func (s *Server) answerZone(ctx context.Context, q query, from netip.Addr, name 
 	if !ok {
 		return s.respond(q, dnsmessage.RCodeNameError, nil, tcp)
 	}
-	if q.question.Type != dnsmessage.TypeA && q.question.Type != typeANY {
+	if q.question.Type != dnsmessage.TypeA && q.question.Type != dnsmessage.TypeALL {
 		return s.respond(q, dnsmessage.RCodeSuccess, nil, tcp)
 	}
 	if !addr.Is4() {
@@ -365,7 +388,7 @@ func (s *Server) answerReverse(ctx context.Context, q query, from, addr netip.Ad
 	if !ok {
 		return s.respond(q, dnsmessage.RCodeNameError, nil, tcp)
 	}
-	if q.question.Type != dnsmessage.TypePTR && q.question.Type != typeANY {
+	if q.question.Type != dnsmessage.TypePTR && q.question.Type != dnsmessage.TypeALL {
 		return s.respond(q, dnsmessage.RCodeSuccess, nil, tcp)
 	}
 	ptr, err := dnsmessage.NewName(name + "." + s.zone + ".")

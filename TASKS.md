@@ -411,6 +411,13 @@ entry.
         device carries no hub address); `Deps.DNSListen` injects a
         loopback listener where a test needs it, as `DNSOptions.Listen`
         does on the client.
+      - Review round (CodeRabbit): the client resolver answers only its
+        own host (Allow is the self address plus loopback), so a peer
+        the policy lets reach port 53 learns nothing; registration waits
+        for a successful bind and is undone on every exit path of `Run`;
+        a failed `resolvectl` step reverts; a hosts block with a lost end
+        marker is repaired; `Serve` reports a dead listener instead of
+        hanging, and the hub stops advertising `dns_listen` then.
       - `TestQRRoundTrip` uses a fixed synthetic key: with the DNS line
         the phone config is a version-12 symbol, and the ZXing port used
         to decode it misreads about one in a hundred random symbols
