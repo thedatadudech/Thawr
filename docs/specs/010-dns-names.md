@@ -205,18 +205,18 @@ dependency row), THREAT_MODEL (A7: names follow visibility), TESTING
 - [x] `dig -x 100.64.0.1 @<self ip>` answers `hub.thawr.`; AAAA for a
       known name is NOERROR without records; `example.com` at the
       client resolver is REFUSED.
-- [x] Linux with systemd-resolved: `resolvectl status <iface>` shows
+- [ ] Linux with systemd-resolved: `resolvectl status <iface>` shows
       the DNS server and the `~thawr` routing domain after `client up`
       and nothing after `client down`. Linux without it: `/etc/hosts`
       carries the block with every peer, and only that block changes;
       `client down` removes it and leaves the rest byte-identical.
-- [x] macOS: `scutil --dns` lists the `thawr` resolver after `client
+- [ ] macOS: `scutil --dns` lists the `thawr` resolver after `client
       up`; `/etc/resolver/thawr` is gone after `client down` (manual
       checklist).
 - [x] `client status` shows `DNS: .thawr via <method>` and `--json`
       validates against `docs/status.schema.json` with the `dns`
       object; `--dns off` omits it.
-- [x] A phone joined with a QR from a `dns.enabled` server resolves a
+- [ ] A phone joined with a QR from a `dns.enabled` server resolves a
       peer the policy lets it reach through `100.64.0.1`, gets NXDOMAIN
       for a peer the policy hides, and resolves an internet name
       through the server's upstream (integration test with a fake
