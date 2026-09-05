@@ -378,8 +378,10 @@ entry.
         `SHA256SUMS` verified, the extracted Linux binary printed the
         tag and commit, and `make release-verify` passed. The systemd
         integration test skips here and runs on a systemd VM.
-- [ ] **010 DNS names** — `<name>.thawr` from a resolver in the client
-      fed by the netmap; per-platform registration (spec to be written).
+- [~] **010 DNS names** — `docs/specs/010-dns-names.md`
+      `<name>.thawr` from a resolver in the client fed by the netmap,
+      the same resolver on the hub for phones (with forwarding to the
+      server host's upstreams), split-DNS registration per platform.
 - [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
       phase 2 items (spec to be written).
 - [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated
