@@ -51,7 +51,14 @@ jobs:
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
+        # A release published by hand for this tag (GitHub's "new release"
+        # page creates the tag) gets the archives attached; otherwise the
+        # workflow creates the release itself.
         run: |
-          prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease";; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            prerelease=""
+            case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease";; esac
+            gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          fi

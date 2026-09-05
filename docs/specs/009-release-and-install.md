@@ -77,7 +77,9 @@ with the VCS revision from Go's build info when present.
 - `.github/workflows/release.yml` runs on tags `v*`: lint and tests as
   in `ci.yml`, then `make release release-verify`, then creates the
   GitHub Release with `gh release create` (the runner's `gh`, no
-  third-party action) and uploads `dist/*` including `SHA256SUMS`.
+  third-party action) and uploads `dist/*` including `SHA256SUMS`; when
+  the release for the tag already exists (published by hand, which
+  also creates the tag) the archives are uploaded to it instead.
   Pre-release tags (`v0.1.0-rc1`) are marked pre-release. The workflow
   has `contents: write` only in the publish job.
 - README gains an "Install" section: download, `sha256sum -c`, put the
