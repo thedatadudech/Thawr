@@ -158,6 +158,11 @@ make release VERSION=v0.1.0   # dist/: archives, SHA256SUMS, thawr.rb
 make release-verify           # two builds, identical archives
 ```
 
+Releases are published by CI: push a tag `vX.Y.Z`, or start the
+`release` workflow by hand in the Actions tab with the version as input
+and it creates the tag on `main` for you. Tags containing a `-`
+(`v0.1.0-rc1`) become pre-releases.
+
 ## Documentation
 
 | Document | Content |

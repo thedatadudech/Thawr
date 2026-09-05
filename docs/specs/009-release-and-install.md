@@ -74,7 +74,10 @@ with the VCS revision from Go's build info when present.
 - `make release-verify` builds every target twice into separate
   directories and fails when any binary differs; CI runs it on every
   release and on pull requests that touch `Makefile` or the workflow.
-- `.github/workflows/release.yml` runs on tags `v*`: lint and tests as
+- `.github/workflows/release.yml` runs on tags `v*`, or by hand
+  (`workflow_dispatch` with a `version` input, refused when that tag
+  already exists; the release then creates the tag on the commit it
+  built): lint and tests as
   in `ci.yml`, then `make release release-verify`, then creates the
   GitHub Release with `gh release create` (the runner's `gh`, no
   third-party action) and uploads `dist/*` including `SHA256SUMS`; when
