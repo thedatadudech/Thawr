@@ -411,6 +411,12 @@ entry.
         device carries no hub address); `Deps.DNSListen` injects a
         loopback listener where a test needs it, as `DNSOptions.Listen`
         does on the client.
+      - `TestQRRoundTrip` uses a fixed synthetic key: with the DNS line
+        the phone config is a version-12 symbol, and the ZXing port used
+        to decode it misreads about one in a hundred random symbols
+        (measured 200 runs per EC level), which made CI flaky. The
+        encoder is unchanged; whether real scanners share the decoder's
+        limit is on the manual phone checklist.
       - Verified here: unit tests for the codec paths, forwarding with a
         fake dialer, every registrar against a temp root and fake
         runner, the daemon serving names over a loopback listener, the
