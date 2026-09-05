@@ -318,13 +318,24 @@ entry.
         403 over HTTPS and 201 for herself. The wg-quick data path is
         covered by the netns tests, which skip here (no CAP_NET_ADMIN).
 
+## Sprint 3 — distribution and hardening
+
+- [ ] **009 Release and install** — `docs/specs/009-release-and-install.md`
+      Reproducible release archives with checksums from CI, `thawr
+      version` details, server version in the status document,
+      `server|client install|uninstall` for systemd, launchd and the
+      Windows service manager.
+- [ ] **010 DNS names** — `<name>.thawr` from a resolver in the client
+      fed by the netmap; per-platform registration (spec to be written).
+- [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
+      phase 2 items (spec to be written).
+- [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated
+      by policy (spec to be written).
+
 ## Phase 2 candidates (not scheduled)
 
-- Signed netmaps and client-side key pinning (threat model T4).
 - OIDC identity provider plugin (ADR 0006).
-- DNS names for peers (`<name>.thawr`).
 - IPv6 overlay.
-- Exit nodes and subnet routers.
 - Separate relay nodes (`thawr relay`).
 - ACME TLS mode, Prometheus metrics, `thawr admin backup`.
 - Workload / agent identity: short-lived tokens issued by CI or an
