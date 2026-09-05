@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -107,7 +108,7 @@ func TestHostsBlockInsertUpdateRemove(t *testing.T) {
 	if string(got) != "127.0.0.1 localhost\n"+renderHostsBlock("thawr", entries())+"192.168.1.9 printer\n" {
 		t.Fatalf("after middle update:\n%s", got)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode changed to %v", info.Mode().Perm())
 	}
 	if err := h.Unregister(ctx, "thawr0"); err != nil {
