@@ -9,15 +9,24 @@
 
 **One binary. No cloud. Works offline.**
 
+[![CI](https://github.com/thedatadudech/Thawr/actions/workflows/ci.yml/badge.svg)](https://github.com/thedatadudech/Thawr/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/thedatadudech/Thawr?include_prereleases&label=release)](https://github.com/thedatadudech/Thawr/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/thedatadudech/Thawr)](go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Thawr is a self-hosted, WireGuard-based private network (mesh VPN / ZTNA)
 that connects laptops, servers, phones and home machines across the
 internet as if they were on one LAN. The name comes from the cave near
 Mecca where the Prophet Muhammad ﷺ and Abu Bakr found shelter during the
 Hijra: hidden, protected, reachable only by those who belong.
 
-Status: pre-alpha. The design is complete (see `docs/`); the
-implementation follows the specs in `docs/specs/` one at a time and is
-tracked in `TASKS.md`.
+Status: release candidate. `v0.1.0-rc3` runs a hub on a VPS with a
+Mac and a phone as peers; specs 001–009 (enrollment, key distribution,
+NAT traversal, relay, ACL policy, status, mobile QR, release and install)
+are implemented and covered by unit and netns integration tests. Config
+keys and the admin API may still change before `v0.1.0`. The design
+lives in `docs/`; the implementation follows one spec at a time from
+`docs/specs/` and is tracked in `TASKS.md`.
 
 ## What you get
 
@@ -129,7 +138,25 @@ end-to-end encrypted, and the path upgrades to `direct` on its own when
 the network allows it.
 
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
-(STUN), UDP 51820 (WireGuard hub for phones).
+(STUN), UDP 51820 (WireGuard hub for phones). When 443 is taken (a
+reverse proxy, Docker, CapRover) set `listen: {https: ":8443"}` and
+`public_addr: vpn.example.com:8443` in `server.yaml`; the server
+opens the host's forward chain for the hub interface itself, also on
+Docker hosts whose default `FORWARD` policy is `DROP`.
+
+## How it compares
+
+| | Tailscale | NetBird | Headscale | Thawr |
+|---|---|---|---|---|
+| Control plane | Vendor cloud | Vendor cloud or self-host (multi-service) | Self-host, re-implements Tailscale's protocol | Self-host, own protocol, one process |
+| Identity | External IdP required | External IdP required | Tailscale clients + OIDC or pre-auth keys | Local users + tokens; OIDC optional |
+| Relay | Vendor DERP fleet | Vendor TURN or self-host coturn | Separate DERP or vendor DERP | Built into the server binary |
+| Database | Vendor | PostgreSQL / SQLite | SQLite / PostgreSQL | SQLite embedded |
+| Works with no internet at all | No | No | Partially | Yes |
+| Deployment | Managed | Docker Compose, 5+ containers | Binary + reverse proxy + DERP | One binary, one YAML line |
+
+Thawr trades breadth for sovereignty and simplicity; `docs/VISION.md`
+has the longer version and the non-goals.
 
 ## Upgrading
 
@@ -181,13 +208,13 @@ and it creates the tag on `main` for you. Tags containing a `-`
 | `TASKS.md` | Backlog and status |
 | `CLAUDE.md` | Working agreement for AI-assisted sessions |
 
-## Contributing
+## Contributing and security
 
-Semantic commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`,
-`test:`), one logical change per commit, `make test lint` clean.
-Contributions are accepted under the Developer Certificate of Origin.
-Pull requests that add cryptographic code are declined on principle (ADR
-0004).
+`CONTRIBUTING.md` has the workflow: semantic commits, one logical
+change per commit, `make test lint` clean, Developer Certificate of
+Origin sign-off. Pull requests that add cryptographic code are declined
+on principle (ADR 0004). Report vulnerabilities privately as described
+in `SECURITY.md`, not in a public issue.
 
 ## License
 
