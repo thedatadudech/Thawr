@@ -6,7 +6,8 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists) | Linux, root, iproute2, nftables |
+| `make release-verify` | Builds two targets twice and compares the archives; CI runs it on every push and before every release | Linux |
 
 The integration tests use the real binary and the WireGuard adapter that
 `wg.Open` selects on the host: the kernel module when it loads, else
@@ -153,3 +154,30 @@ Two devices behind different home routers, server on a public host.
    old tunnel stays dead.
 5. In the admin UI, "Add mobile peer" opens the QR once in a dialog;
    after "Close and discard" there is no way to see the config again.
+
+## Manual checklist for release and install (spec 009)
+
+1. Download a release archive and `SHA256SUMS`, `sha256sum -c
+   SHA256SUMS --ignore-missing` passes; `thawr version` prints the tag,
+   `go1.x`, the platform and the commit; `--json` has the same fields.
+2. macOS: `sudo thawr server install --public-addr ...` or `sudo thawr
+   client install --server ... --token ... --fingerprint ...` writes
+   `/Library/LaunchDaemons/thawr-<role>.plist` and the service is
+   running (`sudo launchctl print system/thawr-client` shows `state =
+   running`; `tail -f /Library/Logs/Thawr/thawr-client.log`). Reboot:
+   the service is running again and `thawr client status` exits 0.
+   `sudo thawr client uninstall` stops it and keeps the enrollment;
+   `--purge --yes` removes `/Library/Application Support/Thawr`.
+3. Windows (untested as of spec 009): in an elevated shell
+   `thawr client install --server ... --token ... --fingerprint ...`
+   creates the `thawr-client` service (`sc query thawr-client` shows
+   RUNNING) with `wintun.dll` next to `thawr.exe`; it survives a
+   reboot; `thawr client uninstall` deletes it.
+4. Linux without systemd (Alpine, containers): `install` exits 2 with
+   a message; `thawr client up` in the foreground still works.
+5. `install` as a normal user exits 2 with `run as root (sudo)`; a
+   binary under the home directory is refused unless `--bin` names it.
+6. Replace the binary with a newer release and restart the service:
+   the server logs pending migrations, the client reconnects without
+   re-enrolling, and a client running an older release shows
+   `client update available` in `thawr client status`.

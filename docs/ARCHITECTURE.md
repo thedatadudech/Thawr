@@ -13,6 +13,13 @@ One binary, three roles:
 | Client | `thawr client up|down|status` | Every laptop, server, VM | Generates and holds the node key, configures the local WireGuard interface, discovers endpoints, probes direct paths, falls back to relay, enforces the receiver-side port filter |
 | Admin | `thawr admin ...` | On the server host (Unix socket) or remotely (REST with a session) | Users, tokens, peers, policy check and reload, mobile QR export |
 
+`thawr server install` and `thawr client install` register the same
+binary with the host's service manager (systemd, launchd, Windows SCM)
+so both roles start at boot and restart on failure; `uninstall`
+reverses it. `thawr version` reports version, toolchain, platform and
+commit; releases are built reproducibly by CI from tags with published
+checksums (spec 009).
+
 Network ports on the server, all configurable:
 
 | Port | Protocol | Purpose |
@@ -86,7 +93,8 @@ flowchart TD
 | `internal/client` | Device side independent of the CLI: state directory (node key, enrollment state, netmap cache), TLS fingerprint pinning, the Enroll call, the sync daemon with endpoint discovery and the path prober, and its local socket API | `Enroll(ctx, Options)`, `NewDaemon(DaemonOptions)`, `Daemon.Run`, `Daemon.Ping`, `BuildConfig`, `NewLocalClient`, `LoadState`, `Forget` | `internal/api/proto`, `internal/wg`, `internal/stun`, `internal/control/path` |
 | `internal/server` | Compose the server: data dir, store, server key, TLS, hub interface, policy, listeners; startup order, readiness, reload, shutdown | `New(cfg, Deps)`, `Run(ctx, reload)`, `Check()`, `Status(ctx)` | `internal/config`, `internal/store`, `internal/wg`, `internal/control`, `internal/api`, `web` |
 | `web` | Static admin UI, embedded | `embed.FS` | nothing |
-| `cmd/thawr` | Flags, config, dependency wiring, signal handling | `main` | all of the above |
+| `internal/svc` | Register the binary as a system service: render systemd units and launchd plists, drive `systemctl`/`launchctl` through an injected runner, create Windows services via x/sys | `New(Options) (Manager, error)`, `Manager.Install/Start/Stop/Uninstall/Status/Logs`, `RenderSystemdUnit`, `RenderLaunchdPlist` | `golang.org/x/sys/windows/svc` |
+| `cmd/thawr` | Flags, config, dependency wiring, signal handling, install commands | `main` | all of the above |
 
 Interfaces are declared in the consuming package. `control` declares the
 storage interfaces it needs; `store` satisfies them. `api` declares what
@@ -395,7 +403,11 @@ answer with the settled path).
 `hub`, `peers[]`, `retrieved_at`. Fields are only ever added.
 `server.state` is `connected`, `reconnecting` (no netmap at all) or
 `cached` (running on the last netmap while the server is unreachable),
-with `attempt`, `next_retry_at` and `unreachable_since` alongside.
+with `attempt`, `next_retry_at` and `unreachable_since` alongside;
+`server.version` is what the last netmap said about the server
+(`NetMap.server_version`), and the CLI adds `client update available`
+when its MAJOR.MINOR is ahead of the client's. That is the only update
+signal Thawr has; it never contacts anything but the user's server.
 `nat.type` is derived from STUN: `symmetric`, `none` (the mapped address
 is one of ours), `cone`, or `unknown` when STUN never answered. A peer's
 `path` is the prober's state (`idle`, `probing`, `direct`, `relay`,
@@ -445,7 +457,7 @@ long as endpoints have not changed.
 | `google.golang.org/grpc`, `google.golang.org/protobuf` | Control channel | Apache-2.0, BSD-3-Clause |
 | `gopkg.in/yaml.v3` | Config and policy | MIT and Apache-2.0 |
 | `golang.org/x/crypto` | argon2id password hashing | BSD-3-Clause |
-| `golang.org/x/net`, `golang.org/x/sys` | Routing tables, syscalls | BSD-3-Clause |
+| `golang.org/x/net`, `golang.org/x/sys` | Routing tables, syscalls, Windows service control manager (`windows/svc`) | BSD-3-Clause |
 | `github.com/vishvananda/netlink` | Linux addresses and routes | Apache-2.0 |
 | `github.com/google/nftables` | Linux receiver-side filter | Apache-2.0 |
 | `tailscale.com/net/stun` (copied into `internal/stun` with license header) | STUN client and server codec | BSD-3-Clause |

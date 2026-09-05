@@ -34,6 +34,9 @@ make run-client    # go run ./cmd/thawr client up --server https://127.0.0.1:844
 make integration   # go test -race -tags integration ./tests/... (Linux, needs CAP_NET_ADMIN)
                    # thawr admin policy check|reload|show and admin peer list|show|add-mobile talk to the server over the admin socket
                    # client status exits 0 connected, 1 server unreachable, 2 usage, 3 not running
+make release VERSION=vX.Y.Z   # scripts/release.sh: reproducible archives, SHA256SUMS, Homebrew formula in dist/
+make release-verify           # builds two targets twice, fails unless byte-identical
+                   # thawr server|client install|uninstall register the binary with systemd, launchd or the Windows SCM (root)
 make proto         # regenerate gRPC/protobuf code (buf + plugins via go run, nothing to install)
 ```
 
@@ -54,10 +57,12 @@ internal/api/       gRPC (client<->server) and REST (admin UI) handlers
 internal/config/    YAML loading, validation, defaults
 internal/client/    device side: state dir, TLS pinning, enrollment, sync daemon, local socket API
 internal/server/    composes the server: bootstrap order, readiness, reload, shutdown
+internal/svc/       service manager adapters: systemd units, launchd plists, Windows services
 web/                admin UI: plain HTML/JS, embedded via embed.FS
 docs/               vision, architecture, ADRs, threat model, specs
 tests/              integration tests (netns-based)
 config/             example configs
+scripts/            release.sh (reproducible archives); packaging/ holds the Homebrew formula template
 ```
 
 ## Fixed architecture decisions
