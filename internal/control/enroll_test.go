@@ -37,7 +37,7 @@ func newEnrollEnv(t *testing.T, overlay string) *enrollEnv {
 		users:    users,
 		tokens:   NewTokens(st, clk.Now, quietLogger()),
 		enroller: NewEnroller(st, clk.Now, quietLogger(), netip.MustParsePrefix(overlay), ""),
-		registry: NewRegistry(st, quietLogger()),
+		registry: NewRegistry(st, quietLogger()).WithOverlay(netip.MustParsePrefix(overlay)),
 	}
 	env.admin = asPrincipal(mustUser(t, users, "markus", store.RoleAdmin))
 	return env
@@ -93,6 +93,9 @@ func TestEnrollAllocatesAndRecords(t *testing.T) {
 	stored, err := env.st.Peers().GetByNodeSecretHash(context.Background(), hashSecret(res.NodeSecret))
 	if err != nil || stored.ID != res.Peer.ID {
 		t.Errorf("lookup by node secret: %+v %v", stored, err)
+	}
+	if stored.ClientVersion != "0.1.0" || stored.OS != "linux/amd64" {
+		t.Errorf("client info not persisted: %+v", stored)
 	}
 	res2, err := env.enroll(t, env.token(t, TokenRequest{}), "second")
 	if err != nil || res2.Peer.IPv4 != "100.64.0.3" || res2.Generation != 2 {

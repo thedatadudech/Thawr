@@ -36,6 +36,29 @@
         <tbody></tbody>
       </table>
 
+      <h2>Add mobile peer</h2>
+      <p class="muted">A phone joins with the official WireGuard app by scanning a QR code. The server keeps only the public key and decrypts the phone's traffic (threat model T4).</p>
+      <form id="mobile-form" class="grid">
+        <label>Owner <input name="owner" required placeholder="user name"></label>
+        <label>Name <input name="name" required placeholder="alice-phone"></label>
+        <label>Kind
+          <select name="kind"><option>human</option><option>server</option><option>agent</option></select>
+        </label>
+        <label>Tags <input name="tags" placeholder="tag:phones"></label>
+        <button type="submit">Create and show QR</button>
+        <p class="error" id="mobile-error"></p>
+      </form>
+      <dialog id="mobile-dialog">
+        <h2>Scan with the WireGuard app</h2>
+        <p class="warning-text" id="mobile-warning"></p>
+        <div id="mobile-qr" class="qr"></div>
+        <pre id="mobile-config"></pre>
+        <div class="row">
+          <button id="mobile-copy" class="link">Copy config</button>
+          <button id="mobile-close">Close and discard</button>
+        </div>
+      </dialog>
+
       <h2>Create enrollment token</h2>
       <form id="token-form" class="grid">
         <label>Owner <input name="owner" required placeholder="user name"></label>

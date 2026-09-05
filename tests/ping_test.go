@@ -94,9 +94,13 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 
 	// Wait until each client is connected and sees the other.
 	type status struct {
-		Connected bool   `json:"connected"`
-		IPv4      string `json:"ipv4"`
-		Peers     []struct {
+		Self struct {
+			IPv4 string `json:"ipv4"`
+		} `json:"self"`
+		Server struct {
+			State string `json:"state"`
+		} `json:"server"`
+		Peers []struct {
 			Name    string `json:"name"`
 			IPv4    string `json:"ipv4"`
 			RxBytes uint64 `json:"rx_bytes"`
@@ -104,7 +108,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 	}
 	getStatus := func(i int) status {
 		var st status
-		out, err := clients[i].cmd(ctx, bin, "client", "status", "--socket", filepath.Join(dir, "client-"+string(rune('1'+i))+".sock")).Output()
+		out, err := clients[i].cmd(ctx, bin, "client", "status", "--json", "--socket", filepath.Join(dir, "client-"+string(rune('1'+i))+".sock")).Output()
 		if err != nil {
 			return st
 		}
@@ -115,7 +119,7 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 	var st1, st2 status
 	for {
 		st1, st2 = getStatus(0), getStatus(1)
-		if st1.Connected && st2.Connected && len(st1.Peers) == 1 && len(st2.Peers) == 1 {
+		if st1.Server.State == "connected" && st2.Server.State == "connected" && len(st1.Peers) == 1 && len(st2.Peers) == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -124,14 +128,14 @@ func TestEncryptedPingTwoClients(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	if out, err := clients[0].cmd(ctx, "ping", "-c", "3", "-W", "2", st2.IPv4).CombinedOutput(); err != nil {
-		t.Fatalf("ping %s from client-1: %v\n%s", st2.IPv4, err, out)
+	if out, err := clients[0].cmd(ctx, "ping", "-c", "3", "-W", "2", st2.Self.IPv4).CombinedOutput(); err != nil {
+		t.Fatalf("ping %s from client-1: %v\n%s", st2.Self.IPv4, err, out)
 	}
 	after := getStatus(1)
 	if len(after.Peers) != 1 || after.Peers[0].RxBytes == 0 {
 		t.Errorf("client-2 received nothing over the tunnel: %+v", after)
 	}
-	if out, err := clients[1].cmd(ctx, "ping", "-c", "3", "-W", "2", st1.IPv4).CombinedOutput(); err != nil {
+	if out, err := clients[1].cmd(ctx, "ping", "-c", "3", "-W", "2", st1.Self.IPv4).CombinedOutput(); err != nil {
 		t.Fatalf("ping back: %v\n%s", err, out)
 	}
 }

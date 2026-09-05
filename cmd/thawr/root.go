@@ -18,6 +18,10 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	// Usage errors exit 2 so scripts can tell them from failures.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return &exitError{code: exitConfigError, err: err}
+	})
 	root.AddCommand(newServerCmd(), newClientCmd(), newAdminCmd(), newVersionCmd())
 	return root
 }
@@ -30,5 +34,15 @@ func newVersionCmd() *cobra.Command {
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "thawr %s\n", version)
 			return err
 		},
+	}
+}
+
+// usageArgs turns a positional-argument error into exit code 2.
+func usageArgs(check cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := check(cmd, args); err != nil {
+			return &exitError{code: exitConfigError, err: err}
+		}
+		return nil
 	}
 }

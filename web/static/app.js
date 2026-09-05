@@ -30,23 +30,38 @@
     return td;
   }
 
-  // pathsRow renders the paths a peer reported (spec 004) under its row.
-  function pathsRow(paths) {
+  // detailRow renders what the server knows about a peer under its row:
+  // reported paths, candidate addresses and the compiled filter.
+  function detailRow(detail) {
     const tr = document.createElement("tr");
     tr.className = "detail";
     const td = document.createElement("td");
     td.colSpan = 8;
-    if (!paths || paths.length === 0) {
-      td.textContent = "No paths reported yet.";
-    } else {
+    const section = (title, items) => {
+      const h = document.createElement("div");
+      h.className = "muted";
+      h.textContent = title;
+      td.append(h);
+      if (items.length === 0) {
+        const p = document.createElement("div");
+        p.textContent = "none";
+        td.append(p);
+        return;
+      }
       const ul = document.createElement("ul");
-      for (const path of paths) {
+      for (const text of items) {
         const li = document.createElement("li");
-        li.textContent = `${path.peer}: ${path.state}${path.endpoint ? " via " + path.endpoint : ""} (${path.updated_at})`;
+        li.textContent = text;
         ul.append(li);
       }
       td.append(ul);
-    }
+    };
+    const meta = [`version ${detail.version || "-"}`, `os ${detail.os || "-"}`];
+    if (detail.last_seen_at) meta.push(`last seen ${detail.last_seen_at}`);
+    section("Client", meta);
+    section("Paths reported", (detail.paths || []).map((p) => `${p.peer}: ${p.state}${p.endpoint ? " via " + p.endpoint : ""} (${p.updated_at})`));
+    section(`Candidates${detail.symmetric ? " (symmetric NAT)" : ""}`, (detail.endpoints || []).map((e) => `${e.addr} (${e.kind})`));
+    section("Filter", (detail.filter || []).map((f) => `${f.src} ${f.proto} ${f.port_lo === f.port_hi ? f.port_lo : f.port_lo + "-" + f.port_hi}`));
     tr.append(td);
     return tr;
   }
@@ -63,7 +78,7 @@
         if (next && next.classList.contains("detail")) { next.remove(); return; }
         try {
           const detail = await api("GET", `/api/v1/peers/${encodeURIComponent(p.name)}`);
-          tr.after(pathsRow(detail.paths));
+          tr.after(detailRow(detail));
         } catch (e) { alert(e.message); }
       }));
       if (me.role === "admin") {
@@ -207,6 +222,36 @@
   });
   $("#copy").addEventListener("click", () => navigator.clipboard?.writeText($("#join-command").textContent));
   $("#dismiss").addEventListener("click", () => { $("#join-command").textContent = ""; show("#token-result", false); });
+
+  // The mobile config is shown once: the dialog holds it only while
+  // open, and closing clears every trace of it.
+  const mobileDialog = $("#mobile-dialog");
+  function discardMobile() {
+    $("#mobile-config").textContent = "";
+    $("#mobile-qr").replaceChildren();
+    $("#mobile-warning").textContent = "";
+    if (mobileDialog.open) mobileDialog.close();
+  }
+  $("#mobile-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    $("#mobile-error").textContent = "";
+    const tags = f.tags.value.split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const m = await api("POST", "/api/v1/peers/mobile", { owner: f.owner.value, name: f.name.value, kind: f.kind.value, tags });
+      $("#mobile-warning").textContent = m.warning;
+      $("#mobile-config").textContent = m.config;
+      const svg = new DOMParser().parseFromString(m.qr_svg, "image/svg+xml").documentElement;
+      if (svg && svg.nodeName === "svg") $("#mobile-qr").replaceChildren(document.adoptNode(svg));
+      mobileDialog.showModal();
+      f.reset();
+      await loadPeers();
+    } catch (e) { $("#mobile-error").textContent = e.message; }
+  });
+  $("#mobile-copy").addEventListener("click", () => navigator.clipboard?.writeText($("#mobile-config").textContent));
+  $("#mobile-close").addEventListener("click", discardMobile);
+  mobileDialog.addEventListener("close", discardMobile);
+  mobileDialog.addEventListener("cancel", discardMobile);
 
   $("#user-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();

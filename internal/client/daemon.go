@@ -142,14 +142,25 @@ type Daemon struct {
 	pathWake      chan struct{}
 	relay         *relay.Client
 
+	// drops samples the filter's drop counter for the 5-minute window.
+	drops *dropWindow
+
 	mu        sync.Mutex
 	key       wg.Key
 	dev       wg.Device
 	netmap    *NetMap
 	connected bool
 	lastError string
-	client    thawrv1.ControlClient
-	stop      context.CancelFunc
+	// attempt counts failed connects since the last good one,
+	// nextRetryAt is when the next try is due, unreachableSince is when
+	// the server was last heard from (zero while connected), and
+	// lastMessage is the last stream message of any kind.
+	attempt          int
+	nextRetryAt      time.Time
+	unreachableSince time.Time
+	lastMessage      time.Time
+	client           thawrv1.ControlClient
+	stop             context.CancelFunc
 	// mapCh delivers applied netmaps to observers (tests).
 	mapCh chan NetMap
 }
@@ -194,7 +205,8 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 		ro.Now = opts.Now
 	}
 	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key,
-		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro)}, nil
+		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
+		drops: newDropWindow(5 * time.Minute)}, nil
 }
 
 // randomPort picks a listen port in the dynamic range.
@@ -294,15 +306,15 @@ func (d *Daemon) syncLoop(ctx context.Context) {
 		}
 		attempt++
 		delay := backoffDelay(attempt, d.opts.MinBackoff, d.opts.MaxBackoff)
+		msg := err.Error()
 		switch status.Code(err) {
 		case codes.PermissionDenied, codes.Unauthenticated:
 			// Removed from the network: keep the daemon (status shows why)
 			// but do not hammer the server.
 			delay = d.opts.MaxBackoff
-			d.setError("removed from the network or credentials rejected; run `thawr client down --forget` and enrol again")
-		default:
-			d.setError(err.Error())
+			msg = "removed from the network or credentials rejected; run `thawr client down --forget` and enrol again"
 		}
+		d.setDisconnected(msg, attempt, d.opts.Now().Add(delay))
 		d.log.Warn("sync disconnected", "err", err, "retry_in", delay, "attempt", attempt)
 		select {
 		case <-ctx.Done():
@@ -344,12 +356,15 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 	d.client = client
 	d.connected = true
 	d.lastError = ""
+	d.attempt, d.nextRetryAt, d.unreachableSince = 0, time.Time{}, time.Time{}
+	d.lastMessage = d.opts.Now()
 	d.mu.Unlock()
 	d.log.Info("sync connected", "server", d.state.Server, "generation", first.GetGeneration())
 	defer func() {
 		d.mu.Lock()
 		d.connected = false
 		d.client = nil
+		d.unreachableSince = d.opts.Now()
 		d.mu.Unlock()
 	}()
 	if err := d.apply(ctx, NetMapFromProto(first, d.opts.Now()), true); err != nil {
@@ -363,6 +378,9 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("sync: %w", err)
 		}
+		d.mu.Lock()
+		d.lastMessage = d.opts.Now()
+		d.mu.Unlock()
 		if msg.GetKeepalive() {
 			continue
 		}
@@ -437,9 +455,14 @@ func (d *Daemon) generation() int64 {
 	return d.netmap.Generation
 }
 
-func (d *Daemon) setError(msg string) {
+// setDisconnected records why the last attempt failed and when the next
+// one is due; the first failure stamps unreachableSince.
+func (d *Daemon) setDisconnected(msg string, attempt int, next time.Time) {
 	d.mu.Lock()
-	d.lastError = msg
+	d.lastError, d.attempt, d.nextRetryAt = msg, attempt, next
+	if d.unreachableSince.IsZero() {
+		d.unreachableSince = d.opts.Now()
+	}
 	d.mu.Unlock()
 }
 
@@ -518,7 +541,9 @@ func (d *Daemon) listenLocal(ctx context.Context) (*http.Server, net.Listener, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("client: listen %s: %w", d.opts.Socket, err)
 	}
-	_ = os.Chmod(d.opts.Socket, 0o660) //nolint:gosec // group access is intended
+	if err := secureSocket(d.opts.Socket); err != nil {
+		d.log.Warn("socket permissions", "err", err)
+	}
 	srv := &http.Server{Handler: d.localHandler(), ReadHeaderTimeout: 5 * time.Second}
 	return srv, ln, nil
 }

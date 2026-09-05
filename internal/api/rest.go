@@ -25,12 +25,16 @@ type RESTDeps struct {
 	Presence PresenceSource
 	// Paths reports how each peer reaches the others; nil means unknown.
 	Paths PathsSource
+	// Endpoints reports each peer's candidate addresses; nil means unknown.
+	Endpoints EndpointSource
 	// NodeAuth and Relay enable GET /relay; without both it answers 501.
 	NodeAuth NodeAuth
 	Relay    RelaySession
 	// Policy enables the policy endpoints.
 	Policy PolicyService
 	Join   JoinInfo
+	// Hub is the server's WireGuard interface as phones connect to it.
+	Hub HubInfo
 	// Sessions backs cookie logins on the HTTPS listener.
 	Sessions *Sessions
 	// Local marks the admin-socket handler: every request acts as the
@@ -80,6 +84,7 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 		mux.HandleFunc("POST /api/v1/tokens", h.requireAuth(h.handleCreateToken))
 		mux.HandleFunc("DELETE /api/v1/tokens/{id}", h.requireAuth(h.handleRevokeToken))
 		mux.HandleFunc("GET /api/v1/peers", h.requireAuth(h.handleListPeers))
+		mux.HandleFunc("POST /api/v1/peers/mobile", h.requireAuth(h.handleCreateMobile))
 		mux.HandleFunc("GET /api/v1/peers/{name}", h.requireAuth(h.handleGetPeer))
 		mux.HandleFunc("PATCH /api/v1/peers/{name}", h.requireAuth(h.handleRenamePeer))
 		mux.HandleFunc("DELETE /api/v1/peers/{name}", h.requireAuth(h.handleDeletePeer))

@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thedatadudech/thawr/internal/control"
 )
@@ -72,5 +74,44 @@ func TestPolicyEndpoints(t *testing.T) {
 	decode(t, env.do(env.handler, member, http.MethodGet, "/api/v1/policy", nil, false), &shown)
 	if shown.Hash != reloaded.Hash || !strings.Contains(shown.Source, "markus:22") {
 		t.Errorf("show after reload: %+v", shown)
+	}
+}
+
+// TestAdminPeerShowFilter checks that a peer's detail carries the
+// compiled filter rules of the policy and its endpoint candidates.
+func TestAdminPeerShowFilter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	endpoints := control.NewEndpointTable(time.Now)
+	env := newRESTEnv(t, func(d *RESTDeps, e *restEnv) {
+		svc := control.NewPolicyService(e.st, d.Logger, path, nil)
+		if err := svc.LoadInitial(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		d.Policy = svc
+		d.Endpoints = endpoints
+	})
+	alice := enrolPeer(t, env, "alice")
+	markus := enrolPeer(t, env, "markus")
+	if err := os.WriteFile(path, []byte("version: 1\nacls:\n  - action: accept\n    src: [alice]\n    dst: ['markus:22', 'markus:8000-8100']\n    proto: tcp\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rec := env.do(env.local, session{}, http.MethodPost, "/api/v1/policy/reload", nil, false); rec.Code != http.StatusOK {
+		t.Fatalf("reload: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := endpoints.Set(markus.ID, []control.Endpoint{{Addr: netip.MustParseAddrPort("192.168.1.9:41820"), Kind: control.EndpointLocal}}, true, 41820); err != nil {
+		t.Fatal(err)
+	}
+	var detail peerDetail
+	decode(t, env.do(env.local, session{}, http.MethodGet, "/api/v1/peers/markus-box", nil, false), &detail)
+	if len(detail.Filter) != 2 || detail.Filter[0].Src != alice.IPv4 || detail.Filter[0].Proto != "tcp" || detail.Filter[0].PortLo != 22 || detail.Filter[0].PortHi != 22 || detail.Filter[1].PortHi != 8100 {
+		t.Errorf("filter: %+v", detail.Filter)
+	}
+	if !detail.Symmetric || len(detail.Endpoints) != 1 || detail.Endpoints[0].Addr != "192.168.1.9:41820" || detail.Endpoints[0].Kind != "local" {
+		t.Errorf("endpoints: %+v symmetric=%v", detail.Endpoints, detail.Symmetric)
+	}
+	// alice's own box has no inbound rule: the filter is empty.
+	decode(t, env.do(env.local, session{}, http.MethodGet, "/api/v1/peers/alice-box", nil, false), &detail)
+	if len(detail.Filter) != 0 {
+		t.Errorf("alice filter: %+v", detail.Filter)
 	}
 }

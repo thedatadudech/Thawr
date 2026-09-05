@@ -58,7 +58,7 @@ func endpointsFromProto(eps []*thawrv1.Endpoint) ([]control.Endpoint, error) {
 func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 	out := &thawrv1.NetMap{
 		Generation: nm.Generation,
-		Self:       &thawrv1.SelfInfo{Id: nm.SelfID, Name: nm.SelfName, Ipv4: nm.SelfIPv4.String(), OverlayCidr: nm.Overlay.String(), StunAddrs: append([]string{}, nm.STUN...)},
+		Self:       &thawrv1.SelfInfo{Id: nm.SelfID, Name: nm.SelfName, Kind: nm.SelfKind, Ipv4: nm.SelfIPv4.String(), OverlayCidr: nm.Overlay.String(), StunAddrs: append([]string{}, nm.STUN...)},
 		Hub:        &thawrv1.HubPeer{PublicKey: nm.Hub.PublicKey, Endpoint: nm.Hub.Endpoint},
 	}
 	for _, p := range nm.Hub.AllowedIPs {
@@ -66,8 +66,8 @@ func netMapToProto(nm control.NetMap) *thawrv1.NetMap {
 	}
 	for _, p := range nm.Peers {
 		np := &thawrv1.NetPeer{
-			Id: p.ID, Name: p.Name, Kind: p.Kind, PublicKey: p.PublicKey, Ipv4: p.IPv4.String(),
-			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive,
+			Id: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, PublicKey: p.PublicKey, Ipv4: p.IPv4.String(),
+			Online: p.Online, Endpoints: endpointsToProto(p.Endpoints), Symmetric: p.Symmetric, Keepalive: p.Keepalive, ViaHub: p.ViaHub,
 		}
 		for _, a := range p.AllowedIPs {
 			np.AllowedIps = append(np.AllowedIps, a.String())

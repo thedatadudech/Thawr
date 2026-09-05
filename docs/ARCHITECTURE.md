@@ -327,14 +327,30 @@ the effective policy with its hash. Spec 006.
 
 ### 4.7 Mobile (static) peers
 
-`thawr admin peer add-mobile --owner alice --name alice-phone` generates a
-WireGuard keypair in server memory, stores the public key as a `static`
-peer, renders a standard WireGuard `.conf` with `Endpoint =
-public_addr:51820`, `AllowedIPs = <overlay cidr>`, and shows it once as
-a QR code (terminal or admin UI). The private key is discarded after
-rendering. The hub forwards between the phone and mesh peers; the
-threat model records that the server sees plaintext for static peers
-only. Spec 008.
+`thawr admin peer add-mobile --owner alice --name alice-phone` (or
+`POST /peers/mobile`, or the admin UI) asks `Registry.CreateStatic` to
+generate a WireGuard keypair in server memory, store the public key as
+a `static` peer with the next free overlay address and no node secret,
+and bump the generation. The REST layer renders a standard WireGuard
+`.conf` (`Endpoint = public_addr:51820`, `AllowedIPs = <overlay
+cidr>`, keepalive 25 s) and a QR code (half blocks in the terminal,
+SVG in the UI), returns them once and zeroes the key. Admins may
+create for any owner; members only for themselves and only with tags
+`tagOwners` grants them.
+
+The generation bump makes `followRegistry` add the phone to the hub
+interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install the
+policy's rules for it on the forward hook; the hub host forwards
+between the interface and itself (Linux: `conf/<iface>/forwarding`,
+set at startup). Agent peers receive the phone as a `via_hub` netmap
+entry: no WireGuard peer of their own, its /32 routed to the hub, its
+address in their filter's visible set, and `via hub` in `client
+status`. Presence for a phone is its hub handshake: `observeOnce`
+records it as `last_seen_at` and the peer counts as online while the
+handshake is under three minutes old. Deleting the peer removes it from
+the hub and every netmap on the next generation. The threat model
+records that the server sees plaintext for static peers only (T4);
+the CLI and the UI say so wherever the config is shown. Spec 008.
 
 ## 5. Wire interfaces
 
@@ -369,10 +385,28 @@ access is filesystem permission (`root` and group `thawr`).
 
 `thawr client status` talks to the running daemon over
 `/var/run/thawr/client.sock` (a Unix socket on every platform; Windows
-supports `AF_UNIX`) with a tiny JSON-over-HTTP API: `GET /status`,
-`POST /down`, `POST /rotate-key`, and `POST /ping/{name}` (mark traffic
-intent, probe, answer with the settled path). Spec 007 formats the
-output.
+supports `AF_UNIX`; mode 0660, group `thawr` where that group exists)
+with a tiny JSON-over-HTTP API: `GET /status`, `POST /down`,
+`POST /rotate-key`, and `POST /ping/{name}` (mark traffic intent, probe,
+answer with the settled path).
+
+`GET /status` returns the document described by `docs/status.schema.json`:
+`version`, `self`, `server`, `wireguard`, `nat`, `relay`, `filter`,
+`hub`, `peers[]`, `retrieved_at`. Fields are only ever added.
+`server.state` is `connected`, `reconnecting` (no netmap at all) or
+`cached` (running on the last netmap while the server is unreachable),
+with `attempt`, `next_retry_at` and `unreachable_since` alongside.
+`nat.type` is derived from STUN: `symmetric`, `none` (the mapped address
+is one of ours), `cone`, or `unknown` when STUN never answered. A peer's
+`path` is the prober's state (`idle`, `probing`, `direct`, `relay`,
+`unreachable`), `offline` when the server reports the peer offline and
+no path is in use, or `hub` for peers reached through the hub;
+`filter.dropped_5m` is a sampled five-minute window over the device's
+drop counter. The CLI is a thin renderer of that document: the table by
+default, `--json` verbatim, `--watch` redrawn every 2 s. Exit codes:
+0 connected, 1 running but the server is unreachable, 2 usage error,
+3 daemon not running. `client ping` combines `POST /ping/{name}` with
+the system `ping` and reports path changes it observes in between.
 
 ## 6. Storage
 
@@ -419,6 +453,8 @@ long as endpoints have not changed.
 | `github.com/spf13/cobra` | CLI subcommands | Apache-2.0 |
 | `golang.org/x/term` | Password prompt without echo | BSD-3-Clause |
 | `github.com/bufbuild/buf` (build time only, via `go run`) | Protobuf compilation in `make proto` | Apache-2.0 |
+| `github.com/santhosh-tekuri/jsonschema/v6` (tests only; pulls `github.com/dlclark/regexp2`) | Validates `client status --json` against `docs/status.schema.json` | Apache-2.0 (regexp2: MIT) |
+| `github.com/makiuchi-d/gozxing` (tests only; pulls `golang.org/x/xerrors`) | Decodes the mobile QR back to the config in `TestQRRoundTrip` | Apache-2.0 (xerrors: BSD-3-Clause) |
 
 All pure Go. The binary builds with `CGO_ENABLED=0` on Linux, macOS, and
 Windows with Go 1.26 or newer (the minimum required by the gRPC and

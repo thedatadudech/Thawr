@@ -150,6 +150,13 @@ func (f *Fake) SetFilter(_ context.Context, set wg.FilterSet) error {
 	return nil
 }
 
+// SetDrops sets the drop counter FilterStats reports.
+func (f *Fake) SetDrops(n uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Drops = n
+}
+
 // FilterStats reports the last filter set's rule count and Drops.
 func (f *Fake) FilterStats() wg.FilterStats {
 	f.mu.Lock()

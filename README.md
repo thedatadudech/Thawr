@@ -38,7 +38,7 @@ tracked in `TASKS.md`.
 - Phones use the official WireGuard app via a QR code.
 - Nothing phones home. It starts and runs with no internet access.
 
-## Quick start (server, enrollment and key distribution work; NAT traversal lands with spec 004)
+## Quick start
 
 Server, on a host with a public address:
 
@@ -62,10 +62,36 @@ thawr client ping <peer>
 ```
 
 `client up` enrols the device on first run and then keeps the WireGuard
-interface in sync with the server until stopped. Peers find each other
-through STUN and WireGuard hole punching: same-LAN addresses first, then
-the public address behind the router; `client ping` shows the path in
-use. When no direct path exists (two symmetric NATs, a strict
+interface in sync with the server until stopped. `client status` shows
+in one table whether the control connection, the path to a peer or the
+policy is the problem (`--json` for scripts, validated by
+`docs/status.schema.json`; exit codes 0 connected, 1 server unreachable,
+2 usage, 3 not running):
+
+```
+thawr 0.1.0 · alice-laptop 100.64.0.7 · server vpn.example.com:8443 connected (netmap #42, 3s ago)
+WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:41820)
+
+PEER          IP            KIND     OWNER   PATH                           HANDSHAKE   RX / TX
+homelab-nas   100.64.0.3    server   -       direct 198.51.100.4:51820      12s         1.2 MB / 340 kB
+build-box     100.64.0.9    agent    -       relay                          3m          0 B / 0 B
+hub           100.64.0.1    server   -       direct vpn.example.com:51820   25s         4 kB / 4.2 kB
+
+Filter: 3 rules · 0 dropped (last 5 min)
+```
+
+Phones join with the official WireGuard app: `thawr admin peer add-mobile
+--owner markus --name markus-phone` prints a QR code to scan (once; the
+server keeps only the public key). Phone traffic goes through the
+server's hub, so the server can read it, unlike the end-to-end tunnels
+between laptops and servers; see the threat model.
+
+Peers find each other through STUN and WireGuard hole punching:
+same-LAN addresses first, then the public address behind the router;
+`client ping` forces the probe and shows the path in use along with the
+echo replies. `thawr admin peer list` and `admin peer show <name>` give
+the admin the same view across the whole network, including each
+peer's candidates and compiled filter. When no direct path exists (two symmetric NATs, a strict
 firewall) the packets go through the relay built into the server, still
 end-to-end encrypted, and the path upgrades to `direct` on its own when
 the network allows it.

@@ -428,7 +428,9 @@ type SelfInfo struct {
 	Ipv4        string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
 	OverlayCidr string                 `protobuf:"bytes,4,opt,name=overlay_cidr,json=overlayCidr,proto3" json:"overlay_cidr,omitempty"`
 	// stun_addrs are the server's STUN listeners as host:port (one or two).
-	StunAddrs     []string `protobuf:"bytes,5,rep,name=stun_addrs,json=stunAddrs,proto3" json:"stun_addrs,omitempty"`
+	StunAddrs []string `protobuf:"bytes,5,rep,name=stun_addrs,json=stunAddrs,proto3" json:"stun_addrs,omitempty"`
+	// kind is the receiving peer's kind (human, server, agent).
+	Kind          string `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -498,6 +500,13 @@ func (x *SelfInfo) GetStunAddrs() []string {
 	return nil
 }
 
+func (x *SelfInfo) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
 // NetPeer is one visible peer.
 type NetPeer struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -512,7 +521,12 @@ type NetPeer struct {
 	// keepalive asks the receiver to send persistent keepalives to this peer.
 	Keepalive bool `protobuf:"varint,9,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
 	// allowed_ips lists extra prefixes routed to this peer besides its /32.
-	AllowedIps    []string `protobuf:"bytes,10,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	AllowedIps []string `protobuf:"bytes,10,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	// owner is the owning user's name; empty for unowned peers.
+	Owner string `protobuf:"bytes,11,opt,name=owner,proto3" json:"owner,omitempty"`
+	// via_hub marks a static (mobile) peer reached through the hub: the
+	// receiver adds no WireGuard peer for it, the hub routes its /32.
+	ViaHub        bool `protobuf:"varint,12,opt,name=via_hub,json=viaHub,proto3" json:"via_hub,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -615,6 +629,20 @@ func (x *NetPeer) GetAllowedIps() []string {
 		return x.AllowedIps
 	}
 	return nil
+}
+
+func (x *NetPeer) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *NetPeer) GetViaHub() bool {
+	if x != nil {
+		return x.ViaHub
+	}
+	return false
 }
 
 // Endpoint is one ip:port candidate.
@@ -1135,14 +1163,15 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x05peers\x18\x03 \x03(\v2\x11.thawr.v1.NetPeerR\x05peers\x12#\n" +
 	"\x03hub\x18\x04 \x01(\v2\x11.thawr.v1.HubPeerR\x03hub\x12,\n" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
-	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"\x84\x01\n" +
+	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"\x98\x01\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04ipv4\x18\x03 \x01(\tR\x04ipv4\x12!\n" +
 	"\foverlay_cidr\x18\x04 \x01(\tR\voverlayCidr\x12\x1d\n" +
 	"\n" +
-	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\"\x9b\x02\n" +
+	"stun_addrs\x18\x05 \x03(\tR\tstunAddrs\x12\x12\n" +
+	"\x04kind\x18\x06 \x01(\tR\x04kind\"\xca\x02\n" +
 	"\aNetPeer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1156,7 +1185,9 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\tkeepalive\x18\t \x01(\bR\tkeepalive\x12\x1f\n" +
 	"\vallowed_ips\x18\n" +
 	" \x03(\tR\n" +
-	"allowedIps\"J\n" +
+	"allowedIps\x12\x14\n" +
+	"\x05owner\x18\v \x01(\tR\x05owner\x12\x17\n" +
+	"\avia_hub\x18\f \x01(\bR\x06viaHub\"J\n" +
 	"\bEndpoint\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.thawr.v1.EndpointKindR\x04kind\"e\n" +

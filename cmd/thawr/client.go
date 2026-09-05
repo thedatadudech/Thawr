@@ -1,12 +1,14 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -119,28 +121,35 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 	down.Flags().BoolVar(&forget, "forget", false, "remove node.key, state.json and the netmap cache")
 	addClientCommonFlags(down, &stateDir, &socket)
 
-	var asJSON bool
+	var asJSON, watch bool
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show the running client's state (JSON; spec 007 adds the table view)",
-		Args:  cobra.NoArgs,
+		Short: "Show the control connection, every peer's path and the filter counters",
+		Long: `Prints one table with the control connection, the local WireGuard
+interface and NAT verdict, one row per visible peer with the path in use,
+and the filter counters. Exit codes: 0 connected, 1 running but the
+server is unreachable, 2 usage error, 3 client not running.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			st, err := client.NewLocalClient(socket).Status(cmd.Context())
+			lc := client.NewLocalClient(socket)
+			if watch {
+				return watchStatus(cmd.Context(), cmd.OutOrStdout(), lc, asJSON)
+			}
+			st, err := lc.Status(cmd.Context())
 			if err != nil {
 				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
 			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(st); err != nil {
+			if err := printStatus(cmd.OutOrStdout(), st, asJSON); err != nil {
 				return err
 			}
-			if !st.Connected {
+			if st.Server.State != client.ServerConnected {
 				return &exitError{code: exitNotConnected, err: errors.New("client is running but not connected to the server")}
 			}
 			return nil
 		},
 	}
-	status.Flags().BoolVar(&asJSON, "json", true, "print JSON (the only format until spec 007)")
+	status.Flags().BoolVar(&asJSON, "json", false, "print the status document as JSON (docs/status.schema.json)")
+	status.Flags().BoolVar(&watch, "watch", false, "redraw every 2 s until Ctrl-C")
 	addClientCommonFlags(status, &stateDir, &socket)
 
 	rotate := &cobra.Command{
@@ -157,33 +166,23 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 	}
 	addClientCommonFlags(rotate, &stateDir, &socket)
 
+	var pingCount int
+	var pingJSON bool
 	ping := &cobra.Command{
 		Use:   "ping <peer>",
-		Short: "Establish a path to a peer and report it (JSON; spec 007 adds the table view)",
+		Short: "Establish a path to a peer, send ICMP echoes and report the path in use",
 		Long: `Marks traffic intent toward the named peer so the client probes its
-candidates now, waits until the path is settled and prints the result.
-Exit code 1 when no direct path was found.`,
-		Args: cobra.ExactArgs(1),
+candidates now, prints every path change, sends --count echoes with the
+system ping to the peer's overlay address and ends with the settled
+path. Exit codes: 0 path in use and echo answered, 1 no path or no
+reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
+		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := client.NewLocalClient(socket).Ping(cmd.Context(), args[0])
-			if err != nil {
-				var le *client.LocalError
-				if errors.As(err, &le) {
-					return &exitError{code: exitConfigError, err: err}
-				}
-				return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
-			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(res); err != nil {
-				return err
-			}
-			if res.State != "direct" {
-				return &exitError{code: exitNotConnected, err: fmt.Errorf("no direct path to %s (%s)", args[0], res.State)}
-			}
-			return nil
+			return runPing(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), pingOptions{socket: socket, peer: args[0], count: pingCount, asJSON: pingJSON})
 		},
 	}
+	ping.Flags().IntVar(&pingCount, "count", 3, "ICMP echoes to send; 0 only establishes the path")
+	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
 	cmd.AddCommand(up, down, status, rotate, ping)
@@ -204,3 +203,42 @@ const (
 )
 
 func logConfig(level string) config.Log { return config.Log{Level: level, Format: "text"} }
+
+// watchInterval is how often --watch redraws.
+const watchInterval = 2 * time.Second
+
+func printStatus(w io.Writer, st client.Status, asJSON bool) error {
+	if asJSON {
+		return printJSON(w, st)
+	}
+	return renderStatus(w, st)
+}
+
+// watchStatus redraws the status until ctx ends (Ctrl-C exits 0) or the
+// daemon goes away (exit 3).
+func watchStatus(ctx context.Context, w io.Writer, lc *client.LocalClient, asJSON bool) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	for {
+		st, err := lc.Status(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
+		}
+		if _, err := io.WriteString(w, "\x1b[2J\x1b[H"); err != nil {
+			return err
+		}
+		if err := printStatus(w, st, asJSON); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}

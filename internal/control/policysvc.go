@@ -162,6 +162,12 @@ func (s *PolicyService) Compiled(ctx context.Context) *policy.Compiled {
 	return s.compiled
 }
 
+// FilterFor returns the compiled receiver-side rules of one peer, as
+// its netmap carries them.
+func (s *PolicyService) FilterFor(ctx context.Context, peerID string) []FilterRule {
+	return filterRules(s.Compiled(ctx).FilterFor(peerID))
+}
+
 // Load is Compiled with a background context, for PolicyVisibility.
 func (s *PolicyService) Load() *policy.Compiled { return s.Compiled(context.Background()) }
 

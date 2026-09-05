@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"github.com/thedatadudech/thawr/internal/store"
@@ -16,6 +17,9 @@ type Registry struct {
 	log    *slog.Logger
 	now    func() time.Time
 	notify Notifier
+	// overlay and tagAllowed serve CreateStatic.
+	overlay    netip.Prefix
+	tagAllowed TagAllowed
 }
 
 // NewRegistry builds the registry service. notify may be nil.
@@ -187,6 +191,11 @@ func (r *Registry) Leave(ctx context.Context, peerID string) error {
 // Touch records that a peer was seen now.
 func (r *Registry) Touch(ctx context.Context, peerID string) error {
 	return r.store.Peers().Touch(ctx, peerID, r.now())
+}
+
+// SetClientVersion records the version a client reported on sync.
+func (r *Registry) SetClientVersion(ctx context.Context, peerID, version string) error {
+	return r.store.Peers().SetClientVersion(ctx, peerID, version)
 }
 
 // Generation returns the current netmap generation.

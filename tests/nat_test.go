@@ -133,12 +133,19 @@ func applyNAT(t *testing.T, nat *netns, kind natKind, wanIface, lanClient string
 	}
 }
 
-// clientStatus is the subset of `client status` the NAT tests read.
+// clientStatus is the subset of `client status --json` the NAT tests
+// read (docs/status.schema.json).
 type clientStatus struct {
-	Connected bool   `json:"connected"`
-	IPv4      string `json:"ipv4"`
-	Symmetric bool   `json:"symmetric"`
-	Relay     struct {
+	Self struct {
+		IPv4 string `json:"ipv4"`
+	} `json:"self"`
+	Server struct {
+		State string `json:"state"`
+	} `json:"server"`
+	NAT struct {
+		Type string `json:"type"`
+	} `json:"nat"`
+	Relay struct {
 		Connected bool `json:"connected"`
 		Peers     int  `json:"peers"`
 	} `json:"relay"`
@@ -147,15 +154,21 @@ type clientStatus struct {
 		Drops uint64 `json:"drops"`
 	} `json:"filter"`
 	Peers []struct {
-		Name         string   `json:"name"`
-		IPv4         string   `json:"ipv4"`
-		Path         string   `json:"path"`
-		PathEndpoint string   `json:"path_endpoint"`
-		Probes       int      `json:"probes"`
-		Candidates   []string `json:"candidates"`
-		RxBytes      uint64   `json:"rx_bytes"`
+		Name               string `json:"name"`
+		IPv4               string `json:"ipv4"`
+		Path               string `json:"path"`
+		PathEndpoint       string `json:"path_endpoint"`
+		Probes             int    `json:"probes"`
+		EndpointCandidates []struct {
+			Addr string `json:"addr"`
+			Kind string `json:"kind"`
+		} `json:"endpoint_candidates"`
+		RxBytes uint64 `json:"rx_bytes"`
 	} `json:"peers"`
 }
+
+// Connected reports whether the client has a live control connection.
+func (s clientStatus) Connected() bool { return s.Server.State == "connected" }
 
 // natMesh starts the server and two clients behind kinds and waits until
 // both are synced with each other's candidates. It returns a status
@@ -209,7 +222,7 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	}
 	status = func(i int) clientStatus {
 		var st clientStatus
-		out, err := sites[i].client.cmd(ctx, bin, "client", "status", "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
+		out, err := sites[i].client.cmd(ctx, bin, "client", "status", "--json", "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
 		if err != nil {
 			return st
 		}
@@ -218,7 +231,7 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	}
 	pingPath = func(i int) (string, string, error) {
 		other := fmt.Sprintf("client-%d", 2-i)
-		out, err := sites[i].client.cmd(ctx, bin, "client", "ping", other, "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
+		out, err := sites[i].client.cmd(ctx, bin, "client", "ping", other, "--json", "--count", "0", "--socket", filepath.Join(dir, fmt.Sprintf("client-%d.sock", i+1))).Output()
 		var res struct {
 			State    string `json:"state"`
 			Endpoint string `json:"endpoint"`
@@ -229,7 +242,7 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		s1, s2 := status(0), status(1)
-		if s1.Connected && s2.Connected && len(s1.Peers) == 1 && len(s2.Peers) == 1 && len(s1.Peers[0].Candidates) > 0 && len(s2.Peers[0].Candidates) > 0 {
+		if s1.Connected() && s2.Connected() && len(s1.Peers) == 1 && len(s2.Peers) == 1 && len(s1.Peers[0].EndpointCandidates) > 0 && len(s2.Peers[0].EndpointCandidates) > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -279,7 +292,7 @@ func TestNATTraversal(t *testing.T) {
 				if st.Peers[0].Probes > int(took/(2*time.Second))+1 {
 					t.Errorf("%d probes in %s", st.Peers[0].Probes, took)
 				}
-				if !st.Symmetric {
+				if st.NAT.Type != "symmetric" {
 					t.Errorf("client did not detect its symmetric NAT: %+v", st)
 				}
 				return

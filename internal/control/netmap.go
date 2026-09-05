@@ -19,6 +19,20 @@ const (
 	EndpointStable
 )
 
+// String names the kind as the client and the admin API show it.
+func (k EndpointKind) String() string {
+	switch k {
+	case EndpointLocal:
+		return "local"
+	case EndpointReflexive:
+		return "reflexive"
+	case EndpointStable:
+		return "stable"
+	default:
+		return ""
+	}
+}
+
 // Endpoint is one ip:port a peer may be reached at.
 type Endpoint struct {
 	Addr netip.AddrPort
@@ -30,6 +44,7 @@ type NetPeer struct {
 	ID         string
 	Name       string
 	Kind       string
+	Owner      string
 	PublicKey  string
 	IPv4       netip.Addr
 	Online     bool
@@ -37,6 +52,9 @@ type NetPeer struct {
 	Symmetric  bool
 	Keepalive  bool
 	AllowedIPs []netip.Prefix
+	// ViaHub marks a static (mobile) peer: the receiver adds no
+	// WireGuard peer for it because the hub routes its address.
+	ViaHub bool
 }
 
 // HubPeer is the server's own WireGuard interface as seen by a peer.
@@ -59,6 +77,7 @@ type NetMap struct {
 	Generation int64
 	SelfID     string
 	SelfName   string
+	SelfKind   string
 	SelfIPv4   netip.Addr
 	Overlay    netip.Prefix
 	Peers      []NetPeer
@@ -139,10 +158,15 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 	if err != nil {
 		return NetMap{}, fmt.Errorf("control: peer %s address %q: %w", self.ID, self.IPv4, err)
 	}
+	owners, err := b.ownerNames(ctx)
+	if err != nil {
+		return NetMap{}, err
+	}
 	nm := NetMap{
 		Generation: b.generation(),
 		SelfID:     self.ID,
 		SelfName:   self.Name,
+		SelfKind:   self.Kind,
 		SelfIPv4:   selfIP,
 		Overlay:    b.hub.Overlay,
 		Hub: HubPeer{
@@ -162,15 +186,20 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if err != nil {
 			continue
 		}
-		// Static peers are reached through the hub, whatever the policy
-		// says about visibility; spec 008 fills in hub-side filtering.
-		if p.Mode == store.ModeStatic {
-			if b.visibility.Visible(self, p) {
-				nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
-			}
+		if !b.visibility.Visible(self, p) {
 			continue
 		}
-		if !b.visibility.Visible(self, p) {
+		online := false
+		if b.presence != nil {
+			online = b.presence.Online(p.ID)
+		}
+		// Static peers are reached through the hub: their address is
+		// routed to the hub and they appear as via-hub entries so status
+		// and the receiver-side filter know them.
+		if p.Mode == store.ModeStatic {
+			nm.Hub.AllowedIPs = append(nm.Hub.AllowedIPs, netip.PrefixFrom(ip, 32))
+			nm.Peers = append(nm.Peers, NetPeer{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: owners[p.OwnerID],
+				PublicKey: p.PublicKey, IPv4: ip, Online: online, ViaHub: true})
 			continue
 		}
 		var (
@@ -180,14 +209,11 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		if b.endpoints != nil {
 			eps, symmetric = b.endpoints.Get(p.ID)
 		}
-		online := false
-		if b.presence != nil {
-			online = b.presence.Online(p.ID)
-		}
 		nm.Peers = append(nm.Peers, NetPeer{
 			ID:         p.ID,
 			Name:       p.Name,
 			Kind:       p.Kind,
+			Owner:      owners[p.OwnerID],
 			PublicKey:  p.PublicKey,
 			IPv4:       ip,
 			Online:     online,
@@ -197,4 +223,17 @@ func (b *NetMapBuilder) Build(ctx context.Context, peerID string) (NetMap, error
 		})
 	}
 	return nm, nil
+}
+
+// ownerNames maps user ids to names so netmaps can show owners.
+func (b *NetMapBuilder) ownerNames(ctx context.Context) (map[string]string, error) {
+	users, err := b.store.Users().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("control: list users: %w", err)
+	}
+	names := make(map[string]string, len(users))
+	for _, u := range users {
+		names[u.ID] = u.Name
+	}
+	return names, nil
 }

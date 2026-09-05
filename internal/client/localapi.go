@@ -9,37 +9,84 @@ import (
 	"net/netip"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"time"
 
+	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/control/path"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
-// Status is the daemon's state as served on the local socket. Spec 007
-// renders it; this spec defines the fields.
+// Status is the daemon's state as served on the local socket and
+// printed by `thawr client status --json`. The shape is documented in
+// docs/status.schema.json; fields are only ever added.
 type Status struct {
-	Version    string     `json:"version"`
-	Name       string     `json:"name"`
-	PeerID     string     `json:"peer_id"`
-	IPv4       string     `json:"ipv4"`
-	Server     string     `json:"server"`
-	Connected  bool       `json:"connected"`
-	LastError  string     `json:"last_error,omitempty"`
-	Generation int64      `json:"generation"`
-	NetMapAt   *time.Time `json:"netmap_at,omitempty"`
-	Backend    string     `json:"backend"`
-	Interface  string     `json:"interface"`
-	ListenPort int        `json:"listen_port"`
-	// Endpoints are this device's own candidates as last reported;
-	// Symmetric is the NAT verdict.
-	Endpoints []string    `json:"endpoints"`
-	Symmetric bool        `json:"symmetric"`
-	Relay     RelayStatus `json:"relay"`
+	Version   string       `json:"version"`
+	Self      SelfStatus   `json:"self"`
+	Server    ServerStatus `json:"server"`
+	WireGuard WGStatus     `json:"wireguard"`
+	NAT       NATStatus    `json:"nat"`
+	Relay     RelayStatus  `json:"relay"`
 	// Filter reports the receiver-side policy filter when the device
 	// supports one.
-	Filter      *wg.FilterStats `json:"filter,omitempty"`
-	Hub         *PeerStatus     `json:"hub,omitempty"`
-	Peers       []PeerStatus    `json:"peers"`
-	RetrievedAt time.Time       `json:"retrieved_at"`
+	Filter      *FilterStatus `json:"filter,omitempty"`
+	Hub         *PeerStatus   `json:"hub,omitempty"`
+	Peers       []PeerStatus  `json:"peers"`
+	RetrievedAt time.Time     `json:"retrieved_at"`
+}
+
+// SelfStatus identifies this device.
+type SelfStatus struct {
+	Name   string `json:"name"`
+	PeerID string `json:"peer_id"`
+	IPv4   string `json:"ipv4"`
+	Kind   string `json:"kind"`
+}
+
+// Server connection states.
+const (
+	ServerConnected    = "connected"
+	ServerReconnecting = "reconnecting"
+	ServerCached       = "cached"
+)
+
+// ServerStatus describes the control connection. State is connected,
+// reconnecting (no netmap yet) or cached (running on the last netmap
+// while the server is unreachable).
+type ServerStatus struct {
+	Addr  string `json:"addr"`
+	State string `json:"state"`
+	// Attempt counts failed connection attempts since the last
+	// successful one; NextRetryAt is when the next one is due.
+	Attempt          int        `json:"attempt"`
+	NextRetryAt      *time.Time `json:"next_retry_at"`
+	UnreachableSince *time.Time `json:"unreachable_since"`
+	Generation       int64      `json:"generation"`
+	LastMessageAt    *time.Time `json:"last_message_at"`
+	LastError        string     `json:"last_error"`
+}
+
+// WGStatus describes the local WireGuard interface.
+type WGStatus struct {
+	Backend    string `json:"backend"`
+	Interface  string `json:"interface"`
+	ListenPort int    `json:"listen_port"`
+}
+
+// NAT types as derived from STUN.
+const (
+	NATUnknown   = "unknown"
+	NATNone      = "none"
+	NATCone      = "cone"
+	NATSymmetric = "symmetric"
+)
+
+// NATStatus is this device's own candidate addresses and the NAT
+// verdict derived from them.
+type NATStatus struct {
+	Type      string   `json:"type"`
+	Reflexive []string `json:"reflexive"`
+	Local     []string `json:"local"`
 }
 
 // RelayStatus describes the relay connection.
@@ -49,51 +96,84 @@ type RelayStatus struct {
 	Peers int `json:"peers"`
 }
 
+// FilterStatus reports the receiver-side filter counters.
+type FilterStatus struct {
+	Rules int    `json:"rules"`
+	Drops uint64 `json:"drops"`
+	// Dropped5m counts drops in the last five minutes.
+	Dropped5m uint64 `json:"dropped_5m"`
+	Flows     int    `json:"flows"`
+}
+
+// Candidate is one address a peer may be reached at.
+type Candidate struct {
+	Addr string `json:"addr"`
+	Kind string `json:"kind"`
+}
+
+// Path values beyond the prober's states.
+const (
+	PathOffline = "offline"
+	PathHub     = "hub"
+)
+
 // PeerStatus joins netmap knowledge with device counters.
 type PeerStatus struct {
 	Name      string `json:"name"`
 	IPv4      string `json:"ipv4"`
-	Kind      string `json:"kind,omitempty"`
+	Kind      string `json:"kind"`
+	Owner     string `json:"owner"`
 	Online    bool   `json:"online"`
 	PublicKey string `json:"public_key"`
-	Endpoint  string `json:"endpoint,omitempty"`
-	// Path is idle, probing, direct or unreachable; PathEndpoint is the
-	// address the path uses.
-	Path         string `json:"path,omitempty"`
-	PathEndpoint string `json:"path_endpoint,omitempty"`
-	// Probes counts candidates tried since the peer appeared;
-	// Candidates are its addresses as delivered by the server.
-	Probes        int        `json:"probes"`
-	Candidates    []string   `json:"candidates"`
-	LastHandshake *time.Time `json:"last_handshake,omitempty"`
-	RxBytes       uint64     `json:"rx_bytes"`
-	TxBytes       uint64     `json:"tx_bytes"`
+	// Path is idle, probing, direct, relay, unreachable, offline (the
+	// server reports the peer offline) or hub (reached through the
+	// hub); PathEndpoint is the address a direct path uses.
+	Path         string `json:"path"`
+	PathEndpoint string `json:"path_endpoint"`
+	// Probes counts candidates tried since the peer appeared.
+	Probes             int         `json:"probes"`
+	EndpointCandidates []Candidate `json:"endpoint_candidates"`
+	LastHandshakeAt    *time.Time  `json:"last_handshake_at"`
+	RxBytes            uint64      `json:"rx_bytes"`
+	TxBytes            uint64      `json:"tx_bytes"`
 }
+
+// hubStale is how old the hub handshake may be before the hub counts
+// as unreachable; WireGuard keepalives run every 25 s.
+const hubStale = 3 * time.Minute
 
 // Status assembles the current status.
 func (d *Daemon) Status(ctx context.Context) Status {
+	now := d.opts.Now()
 	d.mu.Lock()
-	nm, dev, connected, lastErr := d.netmap, d.dev, d.connected, d.lastError
+	nm, dev := d.netmap, d.dev
+	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
+		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
+	if d.connected {
+		srv.State = ServerConnected
+	} else if nm != nil {
+		srv.State = ServerCached
+	}
 	d.mu.Unlock()
 	st := Status{
-		Version: d.opts.Version, Name: d.state.Name, PeerID: d.state.PeerID, IPv4: d.state.IPv4, Server: d.state.Server,
-		Connected: connected, LastError: lastErr, Interface: d.opts.Interface, ListenPort: d.state.ListenPort,
-		Peers: []PeerStatus{}, Endpoints: []string{}, RetrievedAt: d.opts.Now(),
+		Version:   d.opts.Version,
+		Self:      SelfStatus{Name: d.state.Name, PeerID: d.state.PeerID, IPv4: d.state.IPv4},
+		Server:    srv,
+		WireGuard: WGStatus{Interface: d.opts.Interface, ListenPort: d.state.ListenPort},
+		NAT:       NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}},
+		Peers:     []PeerStatus{}, RetrievedAt: now,
 	}
 	d.pmu.Lock()
-	for _, e := range d.selfEndpoints {
-		st.Endpoints = append(st.Endpoints, e.Addr.String())
-	}
-	st.Symmetric = d.selfSymmetric
+	st.NAT = natStatus(d.selfAddrs, d.selfEndpoints, d.selfSymmetric)
 	d.pmu.Unlock()
 	st.Relay = RelayStatus{Connected: d.relay.Connected(), Peers: d.relay.Peers()}
 	stats := map[string]wg.PeerStats{}
 	if dev != nil {
-		st.Backend = dev.Backend()
-		st.Interface = dev.Name()
+		st.WireGuard.Backend = dev.Backend()
+		st.WireGuard.Interface = dev.Name()
 		if fd, ok := dev.(wg.Filterable); ok {
 			fs := fd.FilterStats()
-			st.Filter = &fs
+			st.Filter = &FilterStatus{Rules: fs.Rules, Drops: fs.Drops, Flows: fs.Flows, Dropped5m: d.drops.Delta(now, fs.Drops)}
 		}
 		if list, err := dev.Stats(ctx); err == nil {
 			for _, s := range list {
@@ -104,49 +184,89 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	if nm == nil {
 		return st
 	}
-	st.Generation = nm.Generation
-	if !nm.ReceivedAt.IsZero() {
-		t := nm.ReceivedAt
-		st.NetMapAt = &t
+	st.Self.Kind = nm.SelfKind
+	st.Server.Generation = nm.Generation
+	if st.Server.LastMessageAt == nil && !nm.ReceivedAt.IsZero() {
+		st.Server.LastMessageAt = timePtr(nm.ReceivedAt)
 	}
 	fill := func(ps *PeerStatus) {
 		if s, ok := stats[ps.PublicKey]; ok {
-			if !s.LastHandshake.IsZero() {
-				t := s.LastHandshake
-				ps.LastHandshake = &t
-			}
+			ps.LastHandshakeAt = timePtr(s.LastHandshake)
 			ps.RxBytes, ps.TxBytes = s.RxBytes, s.TxBytes
-			if s.Endpoint.IsValid() {
-				ps.Endpoint = s.Endpoint.String()
-			}
 		}
 	}
 	if nm.Hub.PublicKey != "" {
-		hub := &PeerStatus{Name: "hub", PublicKey: nm.Hub.PublicKey, Endpoint: nm.Hub.Endpoint, Online: true}
+		hub := &PeerStatus{Name: "hub", Kind: "server", PublicKey: nm.Hub.PublicKey, Online: true, EndpointCandidates: []Candidate{},
+			Path: string(path.Unreachable)}
 		if len(nm.Hub.AllowedIPs) > 0 {
-			hub.IPv4 = nm.Hub.AllowedIPs[0]
+			if pfx, err := netip.ParsePrefix(nm.Hub.AllowedIPs[0]); err == nil {
+				hub.IPv4 = pfx.Addr().String()
+			}
 		}
 		fill(hub)
+		if hub.LastHandshakeAt != nil && now.Sub(*hub.LastHandshakeAt) < hubStale {
+			hub.Path, hub.PathEndpoint = string(path.Direct), nm.Hub.Endpoint
+		}
 		st.Hub = hub
 	}
 	for _, p := range nm.Peers {
-		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Online: p.Online, PublicKey: p.PublicKey, Candidates: []string{}}
+		ps := PeerStatus{Name: p.Name, IPv4: p.IPv4, Kind: p.Kind, Owner: p.Owner, Online: p.Online, PublicKey: p.PublicKey,
+			Path: string(path.Idle), EndpointCandidates: []Candidate{}}
 		for _, e := range p.Endpoints {
-			ps.Candidates = append(ps.Candidates, e.Addr+" ("+e.Kind+")")
+			ps.EndpointCandidates = append(ps.EndpointCandidates, Candidate(e))
 		}
 		fill(&ps)
+		if p.ViaHub {
+			ps.Path = PathHub
+			st.Peers = append(st.Peers, ps)
+			continue
+		}
 		if state, ep, probes, ok := d.pathOf(p.ID); ok {
 			ps.Path, ps.Probes = string(state), probes
 			if ep.IsValid() {
 				ps.PathEndpoint = ep.String()
 			}
 		}
-		if ep, err := netip.ParseAddrPort(ps.Endpoint); err == nil && ep.Addr().IsLoopback() {
-			ps.Endpoint = "" // the sink, not a real address
+		// The server's presence verdict wins only while no path is in
+		// use: a direct path outlives a server outage.
+		if !p.Online && (ps.Path == string(path.Idle) || ps.Path == string(path.Unreachable)) {
+			ps.Path = PathOffline
 		}
 		st.Peers = append(st.Peers, ps)
 	}
 	return st
+}
+
+// natStatus derives the NAT verdict from our own candidates: symmetric
+// when STUN saw different mappings, none when the mapped address is one
+// of ours, cone when a mapping exists, unknown when STUN never answered.
+func natStatus(local []netip.Addr, eps []control.Endpoint, symmetric bool) NATStatus {
+	st := NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}}
+	for _, e := range eps {
+		switch e.Kind {
+		case control.EndpointReflexive:
+			st.Reflexive = append(st.Reflexive, e.Addr.String())
+			if st.Type != NATNone && slices.Contains(local, e.Addr.Addr()) {
+				st.Type = NATNone
+			} else if st.Type == NATUnknown {
+				st.Type = NATCone
+			}
+		case control.EndpointLocal:
+			st.Local = append(st.Local, e.Addr.String())
+		case control.EndpointStable:
+		}
+	}
+	if symmetric {
+		st.Type = NATSymmetric
+	}
+	return st
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (d *Daemon) localHandler() http.Handler {

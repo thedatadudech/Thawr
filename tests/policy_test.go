@@ -97,7 +97,7 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 	status := func(i int) clientStatus {
 		var st clientStatus
 		name := []string{"alice-box", "bob-box"}[i]
-		out, err := clients[i].cmd(ctx, bin, "client", "status", "--socket", filepath.Join(dir, name+".sock")).Output()
+		out, err := clients[i].cmd(ctx, bin, "client", "status", "--json", "--socket", filepath.Join(dir, name+".sock")).Output()
 		if err != nil {
 			return st
 		}
@@ -107,7 +107,7 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		a, b := status(0), status(1)
-		if a.Connected && b.Connected && len(a.Peers) == 1 && len(b.Peers) == 1 {
+		if a.Connected() && b.Connected() && len(a.Peers) == 1 && len(b.Peers) == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -169,7 +169,7 @@ func TestPolicyEnforcedEndToEnd(t *testing.T) {
 
 // pingPathOnce runs `client ping` and returns the path state.
 func pingPathOnce(ctx context.Context, ns *netns, bin, socket, peer string) (string, string, error) {
-	out, err := ns.cmd(ctx, bin, "client", "ping", peer, "--socket", socket).Output()
+	out, err := ns.cmd(ctx, bin, "client", "ping", peer, "--json", "--count", "0", "--socket", socket).Output()
 	var res struct {
 		State    string `json:"state"`
 		Endpoint string `json:"endpoint"`

@@ -54,14 +54,17 @@ func TestNetMapBuilder(t *testing.T) {
 	if len(nm.STUN) != 2 || nm.STUN[1] != "vpn.example.com:3479" {
 		t.Errorf("STUN addrs: %v", nm.STUN)
 	}
-	if nm.Generation != 42 || nm.SelfID != a1.Peer.ID || nm.SelfName != "a1" || nm.SelfIPv4.String() != a1.Peer.IPv4 || nm.Overlay != hub.Overlay {
+	if nm.Generation != 42 || nm.SelfID != a1.Peer.ID || nm.SelfName != "a1" || nm.SelfKind != a1.Peer.Kind || nm.SelfIPv4.String() != a1.Peer.IPv4 || nm.Overlay != hub.Overlay {
 		t.Errorf("self: %+v", nm)
 	}
-	if len(nm.Peers) != 1 || nm.Peers[0].ID != a2.Peer.ID {
-		t.Fatalf("visible peers: %+v (want only a2)", nm.Peers)
+	if len(nm.Peers) != 2 || nm.Peers[0].ID != a2.Peer.ID || nm.Peers[1].ID != "phone" {
+		t.Fatalf("visible peers: %+v (want a2 and the phone)", nm.Peers)
+	}
+	if ph := nm.Peers[1]; !ph.ViaHub || ph.IPv4.String() != "100.64.0.21" || ph.Owner != "alice" || len(ph.Endpoints) != 0 || ph.PublicKey != phone.PublicKey {
+		t.Errorf("phone entry: %+v", ph)
 	}
 	p := nm.Peers[0]
-	if !p.Online || !p.Symmetric || len(p.Endpoints) != 1 || p.Endpoints[0].Addr.String() != "192.168.1.5:41820" || p.PublicKey != a2.Peer.PublicKey {
+	if !p.Online || !p.Symmetric || len(p.Endpoints) != 1 || p.Endpoints[0].Addr.String() != "192.168.1.5:41820" || p.PublicKey != a2.Peer.PublicKey || p.Owner != "alice" {
 		t.Errorf("peer a2: %+v", p)
 	}
 	if len(p.AllowedIPs) != 1 || p.AllowedIPs[0].String() != a2.Peer.IPv4+"/32" {
