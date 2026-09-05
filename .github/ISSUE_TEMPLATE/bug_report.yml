@@ -1,0 +1,52 @@
+name: Bug report
+description: Something does not work the way the docs say it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Security problems go to `SECURITY.md`, not here.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `thawr version --json` on the affected machine
+      placeholder: '{"version":"v0.1.0-rc3","go":"go1.26.8","os":"linux","arch":"amd64",...}'
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Server (hub)
+        - Client (systemd)
+        - Client (launchd / macOS)
+        - Client (Windows)
+        - Phone (WireGuard app)
+        - Admin CLI or UI
+        - Build or release
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Status and logs
+      description: |
+        `thawr client status` (or `thawr admin status`) and the relevant log lines
+        (`journalctl -u thawr-client`, `/Library/Logs/Thawr/*.log`). Logs never contain
+        keys or tokens; please check anyway before pasting.
+      render: text
+  - type: textarea
+    id: network
+    attributes:
+      label: Network
+      description: NAT type from `client status`, firewalls in front of the server, Docker on the host, anything unusual
