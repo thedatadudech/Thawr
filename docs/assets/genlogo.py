@@ -136,6 +136,37 @@ def icon():
     return "\n".join(out)
 
 
+def social():
+    """1280x640 social preview: navy card, mark left, wordmark and
+    tagline right. GitHub shows it on links to the repository."""
+    out = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="Thawr">',
+        "<title>Thawr</title>",
+        f'<rect width="1280" height="640" fill="{NAVY}"/>',
+        # subtle mesh in the background corners
+        f'<g stroke="{WHITE}" stroke-opacity="0.08" stroke-width="2">'
+        '<line x1="0" y1="560" x2="220" y2="420"/><line x1="220" y1="420" x2="380" y2="560"/>'
+        '<line x1="220" y1="420" x2="300" y2="220"/><line x1="1280" y1="60" x2="1160" y2="150"/>'
+        '<line x1="1160" y1="150" x2="1040" y2="40"/><line x1="1160" y1="150" x2="1240" y2="300"/></g>',
+        f'<g fill="{WHITE}" fill-opacity="0.18"><circle cx="220" cy="420" r="6"/><circle cx="300" cy="220" r="6"/>'
+        '<circle cx="380" cy="560" r="6"/><circle cx="1160" cy="150" r="6"/><circle cx="1040" cy="40" r="6"/>'
+        '<circle cx="1240" cy="300" r="6"/></g>',
+        mark(x=80, y=100, scale=1.1),
+        f'<text x="560" y="300" font-family="{FONT}" font-size="120" font-weight="800" '
+        f'letter-spacing="8" fill="{WHITE}">THAWR</text>',
+        f'<text x="566" y="366" font-family="{FONT}" font-size="24" font-weight="500" '
+        f'letter-spacing="2" fill="{WHITE}" fill-opacity="0.85">ONE BINARY · NO CLOUD · WORKS OFFLINE</text>',
+        f'<text x="566" y="430" font-family="{FONT}" font-size="26" font-weight="400" '
+        f'fill="{WHITE}" fill-opacity="0.7">Self-hosted WireGuard mesh VPN and ZTNA.</text>',
+        f'<text x="566" y="468" font-family="{FONT}" font-size="26" font-weight="400" '
+        f'fill="{WHITE}" fill-opacity="0.7">Local users, one-time tokens, ACLs in git, relay built in.</text>',
+        f'<text x="566" y="540" font-family="{FONT}" font-size="22" font-weight="500" '
+        f'letter-spacing="1" fill="{TEAL}">github.com/thedatadudech/Thawr</text>',
+        "</svg>",
+    ]
+    return "\n".join(out)
+
+
 def pt_at(cx, cy, r, deg):
     a = math.radians(deg)
     return (cx + r * math.cos(a), cy - r * math.sin(a))
@@ -148,4 +179,5 @@ open("docs/assets/mark.svg", "w").write(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 40 320 200" width="320" height="200" role="img" aria-label="Thawr mark">\n'
     + mark() + "\n</svg>")
 open("docs/assets/icon.svg", "w").write(icon())
+open("docs/assets/social-preview.svg", "w").write(social())
 print("written")
