@@ -61,6 +61,8 @@ type installEnv struct {
 	mgr   *fakeManager
 	calls []string
 	exe   string
+	// dirs records every directory the install created.
+	dirs []string
 }
 
 func newInstallEnv(t *testing.T) *installEnv {
@@ -83,6 +85,7 @@ func newInstallEnv(t *testing.T) *installEnv {
 			st := client.State{Server: o.Server, Name: "box", IPv4: "100.64.0.9", PeerID: "p", NodeSecret: "thawr_ns_secret"}
 			return st, client.SaveState(o.StateDir, st)
 		},
+		mkdirAll: func(dir string, _ os.FileMode) error { env.dirs = append(env.dirs, dir); return nil },
 	}
 	return env
 }
@@ -262,6 +265,11 @@ func TestServerInstallWritesMinimalConfig(t *testing.T) {
 	}
 	if len(s.ReadWritePaths) == 0 || s.ReadWritePaths[0] != "/var/lib/thawr" {
 		t.Errorf("rw paths: %v", s.ReadWritePaths)
+	}
+	// systemd refuses a unit whose ReadWritePaths are missing: the data
+	// directory is created before the service is registered.
+	if len(env.dirs) != 1 || env.dirs[0] != "/var/lib/thawr" {
+		t.Errorf("directories created: %v, want the data_dir", env.dirs)
 	}
 	if !strings.Contains(out, "wrote "+cfgPath) || !strings.Contains(out, "thawr-server started") {
 		t.Errorf("output: %s", out)
