@@ -170,8 +170,8 @@ func TestClientInstallEnrolsBeforeWritingUnit(t *testing.T) {
 		t.Errorf("order: %s", got)
 	}
 	s := env.mgr.installed[0]
-	if s.Name != serviceClient || s.Exec != env.exe {
-		t.Errorf("service: %+v", s)
+	if realExe, _ := filepath.EvalSymlinks(env.exe); s.Name != serviceClient || s.Exec != realExe {
+		t.Errorf("service: %+v (exe %s)", s, realExe)
 	}
 	joined := strings.Join(s.Args, " ")
 	for _, bad := range []string{"thawr_secret_token", "--token", "thawr_ns_secret", "--server"} {

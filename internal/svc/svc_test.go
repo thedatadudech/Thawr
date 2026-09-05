@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -106,7 +107,7 @@ func TestSystemdInstallCommands(t *testing.T) {
 	if len(files) != 1 || files[0] != unit {
 		t.Errorf("files: %v", files)
 	}
-	if fi, err := os.Stat(unit); err != nil || fi.Mode().Perm() != 0o644 {
+	if fi, err := os.Stat(unit); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644) {
 		t.Errorf("unit file: %v %v", fi, err)
 	}
 	if err := m.Start(ctx, "thawr-client"); err != nil {

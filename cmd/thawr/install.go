@@ -94,8 +94,15 @@ func resolveBinary(deps cliDeps, explicit string) (string, error) {
 		return "", fmt.Errorf("%s is not an executable file", path)
 	}
 	if explicit == "" {
-		if home, err := deps.homeDir(); err == nil && home != "" && strings.HasPrefix(path, filepath.Clean(home)+string(os.PathSeparator)) {
-			return "", fmt.Errorf("%s is under your home directory; move it to /usr/local/bin (or pass --bin)", path)
+		if home, err := deps.homeDir(); err == nil && home != "" {
+			// Both sides through EvalSymlinks: Windows may hand out 8.3
+			// short names for one and long names for the other.
+			if real, err := filepath.EvalSymlinks(home); err == nil {
+				home = real
+			}
+			if strings.HasPrefix(path, filepath.Clean(home)+string(os.PathSeparator)) {
+				return "", fmt.Errorf("%s is under your home directory; move it to /usr/local/bin (or pass --bin)", path)
+			}
 		}
 	}
 	return path, nil

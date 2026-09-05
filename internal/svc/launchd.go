@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -113,7 +114,7 @@ func (m *launchd) Status(ctx context.Context, name string) (State, error) {
 }
 
 func (m *launchd) Logs(name string) string {
-	return "tail -f " + filepath.Join(launchdLogDir, name+".log")
+	return "tail -f " + path.Join(launchdLogDir, name+".log")
 }
 
 // RenderLaunchdPlist renders the LaunchDaemons plist for s: run at load,
@@ -132,7 +133,7 @@ func RenderLaunchdPlist(s Service, logDir string) string {
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
 	b.WriteString("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n")
 	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>2</integer>\n")
-	log := filepath.Join(logDir, s.Name+".log")
+	log := path.Join(logDir, s.Name+".log") // a macOS path, whatever the host
 	fmt.Fprintf(&b, "\t<key>StandardOutPath</key>\n\t<string>%s</string>\n", xmlText(log))
 	fmt.Fprintf(&b, "\t<key>StandardErrorPath</key>\n\t<string>%s</string>\n", xmlText(log))
 	b.WriteString("</dict>\n</plist>\n")
