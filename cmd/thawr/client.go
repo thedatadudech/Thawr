@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,14 +26,60 @@ func defaultClientSocket() string {
 	return client.DefaultSocket
 }
 
-func newClientCmd() *cobra.Command {
+// clientUpFlags are shared by `client up` and `client install`.
+type clientUpFlags struct {
+	serverURL, token, fingerprint, name, iface, logLevel string
+	acceptFingerprint                                    bool
+}
+
+func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
+	cmd.Flags().StringVar(&f.serverURL, "server", "", "server URL for enrollment, e.g. https://vpn.example.com")
+	cmd.Flags().StringVar(&f.token, "token", "", "one-time enrollment token")
+	cmd.Flags().StringVar(&f.fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
+	cmd.Flags().BoolVar(&f.acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
+	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
+	cmd.Flags().StringVar(&f.iface, "interface", "thawr0", "WireGuard interface name (macOS: utun)")
+	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
+}
+
+// enrollIfNeeded enrols the device when stateDir holds no enrollment,
+// using --server and --token; an enrolled device ignores a token.
+func enrollIfNeeded(ctx context.Context, deps cliDeps, logger *slog.Logger, f clientUpFlags, stateDir string) error {
+	_, err := client.LoadState(stateDir)
+	switch {
+	case errors.Is(err, client.ErrNotEnrolled):
+		if f.serverURL == "" || f.token == "" {
+			return &exitError{code: exitConfigError, err: errors.New("not enrolled: --server and --token are required")}
+		}
+		st, err := deps.enroll(ctx, client.Options{
+			Server: f.serverURL, Token: f.token, Fingerprint: f.fingerprint, AcceptFingerprint: f.acceptFingerprint,
+			Name: f.name, StateDir: stateDir, Version: version,
+		})
+		if err != nil {
+			var fpErr *client.FingerprintError
+			if errors.As(err, &fpErr) {
+				return &exitError{code: exitConfigError, err: err}
+			}
+			return err
+		}
+		logger.Info("enrolled", "name", st.Name, "ipv4", st.IPv4, "server", st.Server)
+		return nil
+	case err != nil:
+		return err
+	case f.token != "":
+		logger.Warn("already enrolled; ignoring --token")
+	}
+	return nil
+}
+
+func newClientCmd(deps cliDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "client",
 		Short: "Enrol this device and run the node client",
 	}
 	var (
-		serverURL, token, fingerprint, name, stateDir, socket, iface, logLevel string
-		acceptFingerprint                                                      bool
+		upf              clientUpFlags
+		stateDir, socket string
 	)
 	up := &cobra.Command{
 		Use:   "up",
@@ -45,44 +90,20 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 --token enrol it first.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			logger := server.NewLogger(logConfig(logLevel), cmd.ErrOrStderr())
-			if _, err := client.LoadState(stateDir); errors.Is(err, client.ErrNotEnrolled) {
-				if serverURL == "" || token == "" {
-					return &exitError{code: exitConfigError, err: errors.New("not enrolled: --server and --token are required")}
-				}
-				st, err := client.Enroll(cmd.Context(), client.Options{
-					Server: serverURL, Token: token, Fingerprint: fingerprint, AcceptFingerprint: acceptFingerprint,
-					Name: name, StateDir: stateDir, Version: version,
-				})
-				if err != nil {
-					var fpErr *client.FingerprintError
-					if errors.As(err, &fpErr) {
-						return &exitError{code: exitConfigError, err: err}
-					}
-					return err
-				}
-				logger.Info("enrolled", "name", st.Name, "ipv4", st.IPv4, "server", st.Server)
-			} else if err != nil {
+			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
+			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
-			} else if token != "" {
-				logger.Warn("already enrolled; ignoring --token")
 			}
-			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: iface, Logger: logger, Version: version})
+			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version})
 			if err != nil {
 				return err
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := lifecycleContext(cmd.Context())
 			defer stop()
 			return d.Run(ctx)
 		},
 	}
-	up.Flags().StringVar(&serverURL, "server", "", "server URL for enrollment, e.g. https://vpn.example.com")
-	up.Flags().StringVar(&token, "token", "", "one-time enrollment token")
-	up.Flags().StringVar(&fingerprint, "fingerprint", "", "server TLS fingerprint (sha256:...) from the join command")
-	up.Flags().BoolVar(&acceptFingerprint, "accept-fingerprint", false, "trust whatever certificate the server presents now (prints it)")
-	up.Flags().StringVar(&name, "name", "", "peer name to request instead of the hostname")
-	up.Flags().StringVar(&iface, "interface", "thawr0", "WireGuard interface name (macOS: utun)")
-	up.Flags().StringVar(&logLevel, "log-level", "info", "debug, info, warn or error")
+	addClientUpFlags(up, &upf)
 	addClientCommonFlags(up, &stateDir, &socket)
 
 	var forget bool
@@ -185,7 +206,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, ping)
+	cmd.AddCommand(up, down, status, rotate, ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
 	return cmd
 }
 
@@ -217,7 +238,7 @@ func printStatus(w io.Writer, st client.Status, asJSON bool) error {
 // watchStatus redraws the status until ctx ends (Ctrl-C exits 0) or the
 // daemon goes away (exit 3).
 func watchStatus(ctx context.Context, w io.Writer, lc *client.LocalClient, asJSON bool) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := lifecycleContext(ctx)
 	defer stop()
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
