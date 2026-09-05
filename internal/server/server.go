@@ -61,6 +61,7 @@ type Server struct {
 	log  *slog.Logger
 
 	st             *store.Store
+	undoForwarding func()
 	hubKey         wg.Key
 	tlsCert        tls.Certificate
 	tlsFingerprint string
@@ -197,6 +198,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		return err
 	}
 	defer s.closeQuietly("wireguard", s.device.Close)
+	defer s.undoForwarding()
 
 	if err := s.buildServices(ctx); err != nil {
 		return err
@@ -312,7 +314,7 @@ func (s *Server) startHub(ctx context.Context) error {
 	}
 	s.log.Info("wireguard hub ready", "backend", s.device.Backend(), "interface", s.device.Name(),
 		"address", s.cfg.HubAddr().String(), "listen", s.cfg.Listen.WireGuard)
-	enableForwarding(s.device.Name(), s.log)
+	s.undoForwarding = enableForwarding(s.device.Name(), s.log)
 	return nil
 }
 

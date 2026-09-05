@@ -31,10 +31,27 @@ type cliDeps struct {
 	executable func() (string, error)
 	homeDir    func() (string, error)
 	enroll     func(context.Context, client.Options) (client.State, error)
+	mkdirAll   func(string, os.FileMode) error
 }
 
 func productionDeps() cliDeps {
-	return cliDeps{newManager: svc.New, isRoot: isRoot, executable: os.Executable, homeDir: os.UserHomeDir, enroll: client.Enroll}
+	return cliDeps{newManager: svc.New, isRoot: isRoot, executable: os.Executable, homeDir: os.UserHomeDir, enroll: client.Enroll, mkdirAll: os.MkdirAll}
+}
+
+// ensureServerDirs creates the data directory and the admin socket's
+// directory before the service is registered: the systemd unit mounts
+// the file system read-only except for these paths, and systemd refuses
+// to start a unit whose ReadWritePaths do not exist.
+func ensureServerDirs(deps cliDeps, dataDir, adminSocket string) error {
+	if err := deps.mkdirAll(dataDir, 0o700); err != nil {
+		return fmt.Errorf("create data_dir %s: %w", dataDir, err)
+	}
+	if dir := filepath.Dir(adminSocket); filepath.Clean(dir) != filepath.Clean(dataDir) {
+		if err := deps.mkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create admin socket directory %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 // installFlags are shared by both install commands.
@@ -139,6 +156,20 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 	return err
 }
 
+// refuseHubHost rejects a client on a host that runs the server: both
+// would claim the overlay route, and whichever interface comes up first
+// swallows the other's traffic. The hub is already a peer on this host.
+func refuseHubHost(ctx context.Context, m svc.Manager) error {
+	state, err := m.Status(ctx, serviceServer)
+	if err != nil {
+		return err
+	}
+	if state == svc.Absent {
+		return nil
+	}
+	return &exitError{code: exitConfigError, err: fmt.Errorf("%s is installed here: a host running the server is already a peer (the hub) and cannot also run a client; install the client on another machine", serviceServer)}
+}
+
 // uninstallService stops and unregisters name, then, with purge, deletes
 // the paths purgePaths names. A purge without --yes fails before
 // anything is touched.
@@ -201,6 +232,9 @@ launchd or the Windows service manager and starts it. Requires root.`,
 			}
 			cfg, _, err := checkServer(configPath, cmd.ErrOrStderr())
 			if err != nil {
+				return err
+			}
+			if err := ensureServerDirs(deps, cfg.DataDir, cfg.AdminSocket); err != nil {
 				return err
 			}
 			m, err := openManager(deps, cmd.ErrOrStderr())
@@ -302,12 +336,15 @@ Requires root.`,
 			if err != nil {
 				return &exitError{code: exitConfigError, err: err}
 			}
-			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
-			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
-				return err
-			}
 			m, err := openManager(deps, cmd.ErrOrStderr())
 			if err != nil {
+				return err
+			}
+			if err := refuseHubHost(cmd.Context(), m); err != nil {
+				return err
+			}
+			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
+			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
 			}
 			return installService(cmd.Context(), cmd.OutOrStdout(), m, svc.Service{

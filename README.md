@@ -86,6 +86,8 @@ thawr client ping <peer>
 `client install` enrols the device with the one-time token, then
 registers `thawr-client` (systemd, launchd or a Windows service) to run
 `thawr client up` at boot; the token never reaches the service file.
+Run it on every machine except the server: the server host is already
+a peer (the hub), and `client install` refuses to run there.
 `sudo thawr client up --server ... --token ...` does the same in the
 foreground. `client up` enrols the device on first run and then keeps
 the WireGuard interface in sync with the server until stopped. The

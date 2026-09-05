@@ -351,7 +351,12 @@ interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install, on
 the forward hook, every policy rule whose source or destination is a
 static peer (the hub forwards nothing else); the hub host forwards
 between the interface and itself (Linux: `conf/<iface>/forwarding`,
-set at startup). Agent peers receive the phone as a `via_hub` netmap
+macOS: `net.inet.ip.forwarding`, both set at startup; on Linux hosts
+whose forward chain drops by default, as Docker's does, the hub inserts
+an accept rule for its own interface into that chain and removes it on
+shutdown). A host that
+runs the server is itself a peer (the hub) and cannot also run a
+client: both would claim the overlay route; `client install` refuses. Agent peers receive the phone as a `via_hub` netmap
 entry: no WireGuard peer of their own, its /32 routed to the hub, its
 address in their filter's visible set, and `via hub` in `client
 status`. Presence for a phone is its hub handshake: `observeOnce`
