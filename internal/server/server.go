@@ -685,16 +685,32 @@ func (s *Server) installHubFilter(ctx context.Context, peers []store.Peer) {
 	}
 	set := wg.FilterSet{Interface: s.device.Name(), Hook: wg.HookForward, Local: s.cfg.HubAddr().Addr()}
 	compiled := s.policySvc.Compiled(ctx)
+	// The hub forwards only traffic that starts or ends at a static
+	// peer: agent peers reach each other directly. The forward hook
+	// therefore carries, for every destination, the policy's rules
+	// whose source is static, plus every rule toward a static peer.
+	static := map[netip.Addr]bool{}
+	addrs := map[string]netip.Addr{}
 	for _, p := range peers {
 		ip, err := netip.ParseAddr(p.IPv4)
 		if err != nil {
 			continue
 		}
+		addrs[p.ID] = ip
 		set.Visible = append(set.Visible, ip)
-		if p.Mode != store.ModeStatic {
+		if p.Mode == store.ModeStatic {
+			static[ip] = true
+		}
+	}
+	for _, p := range peers {
+		ip, ok := addrs[p.ID]
+		if !ok {
 			continue
 		}
 		for _, r := range compiled.FilterFor(p.ID) {
+			if p.Mode != store.ModeStatic && !static[r.Src] {
+				continue
+			}
 			set.Rules = append(set.Rules, wg.FilterRule{Src: netip.PrefixFrom(r.Src, 32), Dst: ip, Proto: r.Proto, Lo: r.Lo, Hi: r.Hi})
 		}
 	}
