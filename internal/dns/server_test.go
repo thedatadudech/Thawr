@@ -403,3 +403,24 @@ func TestReverseAddr(t *testing.T) {
 		}
 	}
 }
+
+// TestServeReportsListenerFailure: a listener that dies while the
+// context is alive ends Serve with its error instead of a silent hang.
+func TestServeReportsListenerFailure(t *testing.T) {
+	s := NewServer(Options{Source: testSource()})
+	udp, tcp, err := Listen(context.Background(), netip.MustParseAddrPort("127.0.0.1:0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(context.Background(), udp, tcp) }()
+	_ = tcp.Close() // simulate the listener going away underneath
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "tcp listener") {
+			t.Fatalf("Serve returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return after the listener failed")
+	}
+}

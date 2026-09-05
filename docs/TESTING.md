@@ -202,8 +202,9 @@ Two devices behind different home routers, server on a public host.
 5. Phone: re-scan a QR from a server with `dns.enabled` (the default);
    the WireGuard app shows `100.64.0.1` under DNS; the browser opens
    `http://<peer>.thawr:<port>` and ordinary websites still load
-   (forwarded through the server); a peer the policy hides does not
-   resolve.
+   (their names resolve through the hub, which forwards only the DNS
+   query to its upstreams; the traffic itself takes the phone's normal
+   route); a peer the policy hides does not resolve.
 6. `client status` shows `DNS: .thawr via <method>`; `--json`
    validates with the `dns` object; `--dns off` omits both.
 7. `dig @<self ip> -x 100.64.0.1` answers `hub.thawr.`;

@@ -183,6 +183,9 @@ func parseUpstream(s string) (netip.AddrPort, error) {
 	if err != nil {
 		return netip.AddrPort{}, fmt.Errorf("%q is not an IP or IP:port", s)
 	}
+	if ap.Port() == 0 {
+		return netip.AddrPort{}, fmt.Errorf("%q has port 0", s)
+	}
 	return ap, nil
 }
 

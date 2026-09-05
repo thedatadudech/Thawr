@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/dns/dnsmessage"
+
 	"github.com/thedatadudech/thawr/internal/dns"
 )
 
@@ -189,9 +191,53 @@ func TestDaemonDNSOffAndBindFailure(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if st.DNS == nil || st.DNS.State != DNSError || st.DNS.Error != "address in use" || st.DNS.Method != dns.MethodHosts {
+	if st.DNS == nil || st.DNS.State != DNSError || st.DNS.Error != "address in use" || st.DNS.Method != dns.MethodNone {
 		t.Errorf("dns status after bind failure: %+v", st.DNS)
 	}
+	// Nothing was registered: the OS must not route .thawr into a void.
+	if calls, _ := reg.snapshot(); len(calls) != 0 {
+		t.Errorf("registrar touched after a bind failure: %v", calls)
+	}
+}
+
+// TestClientResolverAnswersOnlyLocalHost: a peer the policy lets reach
+// port 53 gets no answer, so a device's netmap is not disclosed by name.
+func TestClientResolverAnswersOnlyLocalHost(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	st := cp.enrol(dir, "a")
+	d, _, stop := startDaemon(t, dir)
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
+	srv := dns.NewServer(d.dnsServerOptions())
+	q := dnsQuery(t, "hub.thawr.")
+	for _, from := range []string{"100.64.0.200", "192.168.1.5"} {
+		if resp, err := srv.Handle(context.Background(), q, netip.MustParseAddr(from), false); err != nil || resp != nil {
+			t.Errorf("query from %s answered: %v %v", from, resp, err)
+		}
+	}
+	for _, from := range []string{st.IPv4, "127.0.0.1"} {
+		if resp, err := srv.Handle(context.Background(), q, netip.MustParseAddr(from), false); err != nil || resp == nil {
+			t.Errorf("query from %s dropped: %v", from, err)
+		}
+	}
+}
+
+// dnsQuery builds a wire-format A query.
+func dnsQuery(t *testing.T, name string) []byte {
+	t.Helper()
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 1, RecursionDesired: true})
+	if err := b.StartQuestions(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(name), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msg
 }
 
 func TestStripZone(t *testing.T) {

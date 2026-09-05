@@ -71,8 +71,11 @@ WireGuard: kernel · thawr0 · listen 41820 · NAT: cone (reflexive 203.0.113.9:
   makes visible to that peer (the same `Visibility` that decides key
   distribution), plus `hub.thawr`. A name therefore discloses nothing a
   key would not (threat model A7).
-- Queries from a source outside the overlay prefix are dropped; the
-  local host (a loopback source) is always answered. Both
+- The client resolver answers only its own host (its overlay address
+  and loopback): a peer the policy lets reach port 53 is dropped, so a
+  device's netmap is not disclosed by name. The hub resolver answers
+  any overlay address, within that address's visibility; sources
+  outside the overlay are dropped. Both
   resolvers listen on overlay addresses only, which are reachable only
   through WireGuard; neither is an open resolver.
 
@@ -155,9 +158,11 @@ func Listen(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Liste
   starts, it binds `<self ip>:53` UDP and TCP. A bind failure (another
   resolver on that address) is logged and shown in status; the daemon
   keeps running.
-- Registration happens once after the first netmap is applied (the
-  interface has its address then), preceded by an `Unregister` to
-  clear what a crashed instance may have left. `apply` calls
+- Registration happens once the resolver is bound and a netmap is
+  applied (the interface has its address then), preceded by an
+  `Unregister` to clear what a crashed instance may have left; a bind
+  failure registers nothing. A failed `resolvectl` step reverts the
+  interface so no half-configured DNS server survives. `apply` calls
   `Registrar.Update` with the current entries (a no-op outside hosts
   mode). `Unregister` runs when the daemon exits, so `client down`
   leaves the resolver configuration as it found it.

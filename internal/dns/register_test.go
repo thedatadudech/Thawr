@@ -118,6 +118,28 @@ func TestHostsBlockInsertUpdateRemove(t *testing.T) {
 	if string(got) != "127.0.0.1 localhost\n192.168.1.9 printer\n" {
 		t.Fatalf("after remove:\n%s", got)
 	}
+	// A begin marker without an end marker (an interrupted write) is
+	// treated as a block to the end of the file, so it never piles up.
+	truncated := "127.0.0.1 localhost\n" + hostsBegin + "\n100.64.0.9 stale.thawr\n"
+	if err := os.WriteFile(path, []byte(truncated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Update(ctx, entries()[:1]); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(path)
+	if string(got) != "127.0.0.1 localhost\n"+renderHostsBlock("thawr", entries()[:1]) {
+		t.Fatalf("after repairing a truncated block:\n%s", got)
+	}
+	if err := os.WriteFile(path, []byte(truncated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Unregister(ctx, "thawr0"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = os.ReadFile(path); string(got) != "127.0.0.1 localhost\n" {
+		t.Fatalf("truncated block not removed:\n%s", got)
+	}
 	// Removing when no block exists is a no-op, even without the file.
 	if err := h.Unregister(ctx, "thawr0"); err != nil {
 		t.Fatal(err)
@@ -185,11 +207,17 @@ func TestResolvedCommands(t *testing.T) {
 	if len(fr.calls) != 1 || fr.calls[0] != "resolvectl revert thawr0" {
 		t.Fatalf("unregister calls %v", fr.calls)
 	}
-	// A failing resolvectl is reported with the step.
+	// A failing resolvectl is reported with the step and the interface
+	// is reverted so no half-configured DNS server survives.
+	fr.calls = nil
 	fr.fail = map[string]error{"resolvectl domain thawr0 ~thawr": errors.New("boom")}
 	if _, err := l.Register(ctx, "thawr0", netip.MustParseAddr("100.64.0.7")); err == nil || !strings.Contains(err.Error(), "resolvectl domain") {
 		t.Fatalf("error %v", err)
 	}
+	if len(fr.calls) != 3 || fr.calls[2] != "resolvectl revert thawr0" {
+		t.Fatalf("no revert after a failed step: %v", fr.calls)
+	}
+	fr.fail = nil
 	// resolvectl missing from PATH means hosts mode even with the directory.
 	opts.LookPath = func(string) (string, error) { return "", errors.New("not found") }
 	l = newLinuxRegistrar(opts.withDefaults())

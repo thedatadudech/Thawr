@@ -379,11 +379,16 @@ Once the first netmap is applied it asks the platform registrar
 ~thawr/default-route false` where systemd-resolved runs, a
 `# thawr begin/end` block in `/etc/hosts` otherwise (rewritten
 atomically on every netmap), `/etc/resolver/thawr` on macOS, an NRPT
-rule on Windows; the daemon unregisters on exit and before registering,
-so a crash leaves nothing behind. `--dns serve` skips registration,
-`--dns off` skips everything; a bind failure is shown in
-`client status`, never fatal. Answers carry a 30 s TTL; names outside
-the zone are REFUSED, since the OS only routes `.thawr` to the client
+rule on Windows. Registration happens only once the resolver is bound,
+so the OS is never pointed at a void; the daemon unregisters when `Run`
+returns, on any path, and unregisters before registering, so what a
+crashed instance left behind is cleared at the next start. `--dns
+serve` skips registration, `--dns off` skips everything; a bind failure
+is shown in `client status`, never fatal. The client resolver answers
+only the local host (its own overlay address and loopback): a peer the
+policy lets reach port 53 gets nothing, so a device's netmap is not
+disclosed through names. Answers carry a 30 s TTL; names outside the
+zone are REFUSED, since the OS only routes `.thawr` to the client
 resolver.
 
 The server binds the same resolver on the hub address
@@ -517,5 +522,5 @@ Windows with Go 1.26 or newer (the minimum required by the gRPC and
 ## 9. Non-goals restated
 
 No own cryptography, no Layer 2, no hosted control plane, no native
-mobile apps in v1, no DNS (phase 2), no exit nodes or subnet routers
+mobile apps in v1, no exit nodes or subnet routers
 (phase 2), no IPv6 overlay (phase 2; schema reserves `ipv6`).

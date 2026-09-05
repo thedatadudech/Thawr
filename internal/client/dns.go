@@ -91,7 +91,8 @@ type dnsState struct {
 
 // netmapSource answers zone lookups from the daemon's current netmap.
 // Every peer in the netmap is visible to this device by construction,
-// so the asking address is irrelevant.
+// and the resolver answers only this host (dnsServerOptions), so the
+// asking address needs no further check.
 type netmapSource struct{ d *Daemon }
 
 func (s netmapSource) Lookup(_ context.Context, _ netip.Addr, name string) (netip.Addr, bool) {
@@ -151,27 +152,50 @@ func (d *Daemon) startDNS(ctx context.Context) {
 	}
 	d.dns.serving = true
 	d.mu.Unlock()
-	srv := dns.NewServer(dns.Options{Source: netmapSource{d}, Allow: d.overlay, Logger: d.log})
+	srv := dns.NewServer(d.dnsServerOptions())
 	go func() {
 		if err := srv.Serve(ctx, udp, tcp); err != nil {
-			d.log.Warn("dns: resolver stopped", "err", err)
+			d.mu.Lock()
+			d.dns.serving = false
+			d.dns.err = err.Error()
+			d.mu.Unlock()
+			d.log.Error("dns: resolver stopped", "err", err)
 		}
 	}()
 	d.log.Info("dns: serving zone", "zone", dns.Zone, "listen", addr.String())
+	// A netmap restored from the cache was applied before the resolver
+	// existed; register now that there is something to route to.
+	d.registerDNS(ctx)
 }
 
-// registerDNS routes the zone to the resolver the first time a netmap
-// is applied, after clearing what a crashed instance may have left, and
-// hands the current entries to the registrar on every netmap.
+// dnsServerOptions restricts the client resolver to the local host: the
+// overlay address it listens on and loopback. Another peer that the
+// policy lets reach port 53 gets no answer, so this device's netmap
+// (which peers it may see) is never disclosed through names.
+func (d *Daemon) dnsServerOptions() dns.Options {
+	return dns.Options{Source: netmapSource{d}, Allow: netip.PrefixFrom(d.selfIP, d.selfIP.BitLen()), Reverse: d.overlay, Logger: d.log}
+}
+
+// registerDNS routes the zone to the resolver once it serves and a
+// netmap has been applied, after clearing what a crashed instance may
+// have left, and hands the current entries to the registrar on every
+// netmap. Nothing is registered while the resolver is not bound: the
+// OS would route .thawr into a void.
 func (d *Daemon) registerDNS(ctx context.Context) {
 	o := d.opts.DNS
 	if o.Mode != DNSOn || o.Registrar == nil {
 		return
 	}
 	d.mu.Lock()
+	serving := d.dns.serving
 	registered := d.dns.registered
-	d.dns.registered = true
+	if serving {
+		d.dns.registered = true
+	}
 	d.mu.Unlock()
+	if !serving {
+		return
+	}
 	if !registered {
 		if err := o.Registrar.Unregister(ctx, d.iface()); err != nil {
 			d.log.Debug("dns: clearing previous registration", "err", err)

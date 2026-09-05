@@ -88,7 +88,9 @@ type Server struct {
 	netmaps   *control.NetMapBuilder
 	relay     *relay.Server
 	dnsSource *registrySource
-	dnsListen string
+	// dnsListen is the hub resolver's address for status, empty when off
+	// or stopped.
+	dnsListen atomic.Pointer[string]
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -294,7 +296,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		"tls_fingerprint", s.tlsFingerprint,
 		"hub_public_key", s.hubKey.PublicKey().String(),
 		"hub_endpoint", cfg.HubEndpoint(),
-		"dns", s.dnsListen)
+		"dns", s.dnsListenAddr())
 	s.readyOnce.Do(func() { close(s.ready) })
 
 	for {
@@ -545,6 +547,14 @@ func (s *Server) closeQuietly(what string, closeFn func() error) {
 	}
 }
 
+// dnsListenAddr is the hub resolver's address, empty when it is off.
+func (s *Server) dnsListenAddr() string {
+	if p := s.dnsListen.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
 // Status implements api.StatusSource.
 func (s *Server) Status(ctx context.Context) (api.Status, error) {
 	count, err := s.st.Peers().Count(ctx)
@@ -557,7 +567,7 @@ func (s *Server) Status(ctx context.Context) (api.Status, error) {
 		PeerCount:      count,
 		TLSFingerprint: s.tlsFingerprint,
 		HubPublicKey:   s.hubKey.PublicKey().String(),
-		DNSListen:      s.dnsListen,
+		DNSListen:      s.dnsListenAddr(),
 	}
 	if s.relay != nil {
 		st.Relay = s.relay.Stats()
