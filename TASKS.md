@@ -318,13 +318,71 @@ entry.
         403 over HTTPS and 201 for herself. The wg-quick data path is
         covered by the netns tests, which skip here (no CAP_NET_ADMIN).
 
+## Sprint 3 — distribution and hardening
+
+- [x] **009 Release and install** — `docs/specs/009-release-and-install.md`
+      Reproducible release archives with checksums from CI, `thawr
+      version` details, server version in the status document,
+      `server|client install|uninstall` for systemd, launchd and the
+      Windows service manager.
+      - Service names are `thawr-server` and `thawr-client` on every
+        platform, including the launchd label and plist name (the spec
+        draft's dotted labels were dropped for one name everywhere).
+      - `internal/svc` writes unit files itself and drives `systemctl`
+        and `launchctl` through an injected runner; unit tests run the
+        systemd and launchd managers on every OS against a fake runner,
+        so no test touches a live init system. Windows uses x/sys
+        `windows/svc/mgr` (already a dependency) and is compile-checked.
+      - launchd: `Install` only writes the plist because bootstrapping a
+        RunAtLoad daemon starts it; `Start` bootstraps (or kickstarts an
+        already loaded job), `Stop` boots it out until the next start or
+        reboot.
+      - The install commands take their process dependencies (service
+        manager, root check, executable path, enrolment) from a
+        `cliDeps` struct built in `productionDeps`, so tests inject
+        fakes without package-level state.
+      - `client install` enrols before anything is written outside the
+        0600 state directory; the unit never carries `--token` or
+        `--server`. `uninstall --purge` fails before touching the
+        service when `--yes` is missing.
+      - The running binary is refused under a home directory unless
+        `--bin` names it: a Homebrew or `/usr/local/bin` install is the
+        expectation for a service.
+      - Windows: `lifecycleContext` runs `svc.Run` when started by the
+        service control manager and cancels the process context on Stop
+        or Shutdown; consoles keep Ctrl-C.
+      - Release builds: `scripts/release.sh` (bash, CI runner) instead
+        of Make macros; `-buildvcs=false -buildid=` plus fixed archive
+        mtimes from the commit time make archives byte-identical;
+        `make release-verify` proves it on every CI run in about 15 s.
+        The Homebrew formula is rendered for a user-maintained tap, not
+        published.
+      - `server.version` is carried in `NetMap.server_version` (field 7)
+        and shown after the server address; the update hint compares
+        MAJOR.MINOR through `control.NewerMajorMinor`, and dev builds
+        never trigger it.
+      - Verified on this box with the real binary and a fake `systemctl`
+        on PATH (no systemd PID 1 here): `server install --public-addr`
+        wrote the config (0640) and unit, ran daemon-reload, enable,
+        start; a second install reported "already installed"; a
+        non-root run exited 2; `client install` against a live server
+        enrolled first and wrote a unit without the token or node
+        secret; `uninstall --purge --yes` removed unit and state;
+        `make release VERSION=v0.0.0-test` produced five archives whose
+        `SHA256SUMS` verified, the extracted Linux binary printed the
+        tag and commit, and `make release-verify` passed. The systemd
+        integration test skips here and runs on a systemd VM.
+- [ ] **010 DNS names** — `<name>.thawr` from a resolver in the client
+      fed by the netmap; per-platform registration (spec to be written).
+- [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
+      phase 2 items (spec to be written).
+- [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated
+      by policy (spec to be written).
+
 ## Phase 2 candidates (not scheduled)
 
-- Signed netmaps and client-side key pinning (threat model T4).
 - OIDC identity provider plugin (ADR 0006).
-- DNS names for peers (`<name>.thawr`).
 - IPv6 overlay.
-- Exit nodes and subnet routers.
 - Separate relay nodes (`thawr relay`).
 - ACME TLS mode, Prometheus metrics, `thawr admin backup`.
 - Workload / agent identity: short-lived tokens issued by CI or an

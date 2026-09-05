@@ -66,6 +66,8 @@ message NetMap {
   repeated FilterRule filter = 5;
   // keepalive marks a periodic resend with no change.
   bool keepalive = 6;
+  // server_version is the version string of the server that built it.
+  string server_version = 7;
 }
 
 // SelfInfo describes the receiving peer.

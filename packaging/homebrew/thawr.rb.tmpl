@@ -1,0 +1,47 @@
+# Homebrew formula for a user-maintained tap. scripts/release.sh renders
+# it with the release checksums into dist/thawr.rb.
+class Thawr < Formula
+  desc "Self-hosted WireGuard private network. One binary. No cloud. Works offline."
+  homepage "https://github.com/thedatadudech/Thawr"
+  version "@VERSION_NUMBER@"
+  license "Apache-2.0"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_arm64.tar.gz"
+      sha256 "@SHA_DARWIN_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_darwin_amd64.tar.gz"
+      sha256 "@SHA_DARWIN_AMD64@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_arm64.tar.gz"
+      sha256 "@SHA_LINUX_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/thedatadudech/Thawr/releases/download/v#{version}/thawr_v#{version}_linux_amd64.tar.gz"
+      sha256 "@SHA_LINUX_AMD64@"
+    end
+  end
+
+  def install
+    bin.install "thawr"
+    pkgshare.install "server.example.yaml"
+  end
+
+  def caveats
+    <<~EOS
+      Thawr manages its own services (they need root):
+        sudo thawr client install --server https://vpn.example.com --token ... --fingerprint sha256:...
+        sudo thawr server install --public-addr vpn.example.com
+    EOS
+  end
+
+  test do
+    assert_match "thawr v#{version}", shell_output("#{bin}/thawr version")
+  end
+end

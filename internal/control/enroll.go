@@ -248,3 +248,18 @@ func platform(os, arch string) string {
 		return os + "/" + arch
 	}
 }
+
+// NewerMajorMinor reports whether server is ahead of client in
+// MAJOR.MINOR, ignoring a leading "v" and anything after the minor.
+// Versions that do not parse (development builds) are never newer.
+func NewerMajorMinor(server, client string) bool {
+	sMaj, sMin, ok := parseMajorMinor(server)
+	if !ok {
+		return false
+	}
+	cMaj, cMin, ok := parseMajorMinor(client)
+	if !ok {
+		return false
+	}
+	return sMaj > cMaj || (sMaj == cMaj && sMin > cMin)
+}

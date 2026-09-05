@@ -38,31 +38,57 @@ tracked in `TASKS.md`.
 - Phones use the official WireGuard app via a QR code.
 - Nothing phones home. It starts and runs with no internet access.
 
+## Install
+
+Releases are built by CI from a tag, reproducibly, and ship with
+checksums. Download the archive for your platform from the GitHub
+Releases page, verify it, and put the binary on the path:
+
+```
+curl -LO https://github.com/thedatadudech/Thawr/releases/download/v0.1.0/thawr_v0.1.0_linux_amd64.tar.gz
+curl -LO https://github.com/thedatadudech/Thawr/releases/download/v0.1.0/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf thawr_v0.1.0_linux_amd64.tar.gz
+sudo install -m 0755 thawr_v0.1.0_linux_amd64/thawr /usr/local/bin/thawr
+thawr version
+```
+
+macOS: the `darwin_arm64` (Apple silicon) or `darwin_amd64` archive,
+`shasum -a 256 -c`. Windows: the `.zip`, `Get-FileHash`. Each release
+also carries `thawr.rb`, a Homebrew formula for your own tap. The
+`thawr` binary is the same on every machine; what differs is the
+subcommand you install.
+
 ## Quick start
 
-Server, on a host with a public address:
-
-```yaml
-# /etc/thawr/server.yaml
-public_addr: vpn.example.com
-```
+Server, on a host with a public address (Linux with systemd, or macOS):
 
 ```
-thawr server --config /etc/thawr/server.yaml
+sudo thawr server install --public-addr vpn.example.com
 thawr admin user create markus --role admin
 thawr admin token create --owner markus --kind human
 ```
 
+`server install` writes `/etc/thawr/server.yaml` with that one line,
+validates it, and registers `thawr-server` to start at boot
+(`journalctl -u thawr-server -f` follows the log). Without a service
+manager, `thawr server --config /etc/thawr/server.yaml` runs it in the
+foreground.
+
 Client, on any machine:
 
 ```
-sudo thawr client up --server https://vpn.example.com --token thawr_... --fingerprint sha256:...
+sudo thawr client install --server https://vpn.example.com --token thawr_... --fingerprint sha256:...
 thawr client status
 thawr client ping <peer>
 ```
 
-`client up` enrols the device on first run and then keeps the WireGuard
-interface in sync with the server until stopped. `client status` shows
+`client install` enrols the device with the one-time token, then
+registers `thawr-client` (systemd, launchd or a Windows service) to run
+`thawr client up` at boot; the token never reaches the service file.
+`sudo thawr client up --server ... --token ...` does the same in the
+foreground. `client up` enrols the device on first run and then keeps
+the WireGuard interface in sync with the server until stopped. `client status` shows
 in one table whether the control connection, the path to a peer or the
 policy is the problem (`--json` for scripts, validated by
 `docs/status.schema.json`; exit codes 0 connected, 1 server unreachable,
@@ -99,6 +125,26 @@ the network allows it.
 Ports on the server: TCP 443 (control, UI, relay), UDP 3478–3479
 (STUN), UDP 51820 (WireGuard hub for phones).
 
+## Upgrading
+
+Replace the binary and restart the service:
+
+```
+sudo install -m 0755 thawr /usr/local/bin/thawr
+sudo systemctl restart thawr-server        # or thawr-client
+sudo launchctl kickstart -k system/thawr-client   # macOS
+```
+
+The server applies pending database migrations at start; clients keep
+their enrollment. A server can refuse clients older than
+`min_client_version` in its config; `thawr client status` shows the
+server's version and says `client update available` when the server is
+ahead. Nothing checks for updates over the internet: the only version
+Thawr ever compares against is your own server's.
+
+`thawr server uninstall` and `thawr client uninstall` remove the
+service and keep the data; add `--purge --yes` to delete it.
+
 ## Building
 
 Requires Go 1.26 or newer. No CGO, no Node.
@@ -108,6 +154,8 @@ make build      # bin/thawr
 make test
 make lint       # gofmt, go vet, golangci-lint
 make integration  # Linux with CAP_NET_ADMIN
+make release VERSION=v0.1.0   # dist/: archives, SHA256SUMS, thawr.rb
+make release-verify           # two builds, identical archives
 ```
 
 ## Documentation

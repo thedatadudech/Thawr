@@ -27,7 +27,7 @@ func statusFixture() client.Status {
 		Version: "0.1.0",
 		Self:    client.SelfStatus{Name: "alice-laptop", PeerID: "p1", IPv4: "100.64.0.7", Kind: "human"},
 		Server: client.ServerStatus{Addr: "vpn.example.com:8443", State: client.ServerConnected, Generation: 42,
-			LastMessageAt: at(3 * time.Second)},
+			LastMessageAt: at(3 * time.Second), Version: "v0.1.0"},
 		WireGuard: client.WGStatus{Backend: "kernel", Interface: "thawr0", ListenPort: 41820},
 		NAT:       client.NATStatus{Type: client.NATCone, Reflexive: []string{"203.0.113.9:41820"}, Local: []string{"192.168.1.20:41820"}},
 		Relay:     client.RelayStatus{Connected: true, Peers: 1},
@@ -70,6 +70,25 @@ func TestStatusRender(t *testing.T) {
 	for _, want := range []string{"connected (netmap #42, 3s ago)", "NAT: cone (reflexive 203.0.113.9:41820)", "direct 198.51.100.4:51820", "1.2 MB / 340 kB", "via hub", "never", "3 rules · 0 dropped (last 5 min)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q", want)
+		}
+	}
+}
+
+func TestStatusServerVersionHint(t *testing.T) {
+	for _, tc := range []struct{ server, client, want string }{
+		{"", "0.1.0", "server vpn.example.com:8443 connected"},
+		{"v0.1.3", "0.1.0", "server vpn.example.com:8443 v0.1.3 connected"},
+		{"v0.2.0", "0.1.0", "server vpn.example.com:8443 v0.2.0 (client update available) connected"},
+		{"v0.2.0", "dev", "server vpn.example.com:8443 v0.2.0 connected"},
+	} {
+		st := statusFixture()
+		st.Server.Version, st.Version = tc.server, tc.client
+		var buf bytes.Buffer
+		if err := renderStatus(&buf, st); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Errorf("server %q client %q: header %q lacks %q", tc.server, tc.client, strings.SplitN(buf.String(), "\n", 2)[0], tc.want)
 		}
 	}
 }

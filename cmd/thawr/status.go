@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/thedatadudech/thawr/internal/client"
+	"github.com/thedatadudech/thawr/internal/control"
 )
 
 // maxNameWidth is the widest peer name shown before truncation.
@@ -18,7 +19,7 @@ const maxNameWidth = 20
 // relative to st.RetrievedAt so the output is reproducible.
 func renderStatus(w io.Writer, st client.Status) error {
 	now := st.RetrievedAt
-	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverState(st.Server, now)); err != nil {
+	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT)); err != nil {
@@ -43,6 +44,20 @@ func renderStatus(w io.Writer, st client.Status) error {
 	}
 	_, err := fmt.Fprintf(w, "\nFilter: %s\n", filterLine(st.Filter))
 	return err
+}
+
+// serverVersion renders " v0.2.0" after the server address, with
+// " (client update available)" when the server's MAJOR.MINOR is ahead
+// of this client's; empty until a netmap reported the version.
+func serverVersion(st client.Status) string {
+	if st.Server.Version == "" {
+		return ""
+	}
+	s := " " + st.Server.Version
+	if control.NewerMajorMinor(st.Server.Version, st.Version) {
+		s += " (client update available)"
+	}
+	return s
 }
 
 // serverState renders the control connection as

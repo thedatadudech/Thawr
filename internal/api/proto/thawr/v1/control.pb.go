@@ -343,7 +343,9 @@ type NetMap struct {
 	Hub        *HubPeer               `protobuf:"bytes,4,opt,name=hub,proto3" json:"hub,omitempty"`
 	Filter     []*FilterRule          `protobuf:"bytes,5,rep,name=filter,proto3" json:"filter,omitempty"`
 	// keepalive marks a periodic resend with no change.
-	Keepalive     bool `protobuf:"varint,6,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	Keepalive bool `protobuf:"varint,6,opt,name=keepalive,proto3" json:"keepalive,omitempty"`
+	// server_version is the version string of the server that built it.
+	ServerVersion string `protobuf:"bytes,7,opt,name=server_version,json=serverVersion,proto3" json:"server_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -418,6 +420,13 @@ func (x *NetMap) GetKeepalive() bool {
 		return x.Keepalive
 	}
 	return false
+}
+
+func (x *NetMap) GetServerVersion() string {
+	if x != nil {
+		return x.ServerVersion
+	}
+	return ""
 }
 
 // SelfInfo describes the receiving peer.
@@ -1154,7 +1163,7 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
 	"generation\x12%\n" +
-	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\"\xea\x01\n" +
+	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\"\x91\x02\n" +
 	"\x06NetMap\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x01 \x01(\x03R\n" +
@@ -1163,7 +1172,8 @@ const file_thawr_v1_control_proto_rawDesc = "" +
 	"\x05peers\x18\x03 \x03(\v2\x11.thawr.v1.NetPeerR\x05peers\x12#\n" +
 	"\x03hub\x18\x04 \x01(\v2\x11.thawr.v1.HubPeerR\x03hub\x12,\n" +
 	"\x06filter\x18\x05 \x03(\v2\x14.thawr.v1.FilterRuleR\x06filter\x12\x1c\n" +
-	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\"\x98\x01\n" +
+	"\tkeepalive\x18\x06 \x01(\bR\tkeepalive\x12%\n" +
+	"\x0eserver_version\x18\a \x01(\tR\rserverVersion\"\x98\x01\n" +
 	"\bSelfInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +

@@ -9,7 +9,7 @@ CONFIG      ?= config/server.example.yaml
 
 export CGO_ENABLED = 0
 
-.PHONY: all build test lint fmt vet integration run-server run-client proto clean
+.PHONY: all build test lint fmt vet integration run-server run-client proto release release-verify clean
 
 all: build
 
@@ -45,5 +45,18 @@ run-client: build
 proto:
 	cd internal/api/proto && $(GO) run github.com/bufbuild/buf/cmd/buf@v1.57.2 generate
 
+# Release archives for every platform, reproducible; VERSION must be a
+# tag like v0.1.0 (scripts/release.sh checks). CI runs this on tags.
+release:
+	scripts/release.sh $(VERSION) dist
+
+# Builds two targets twice and fails unless the archives are identical.
+VERIFY_VERSION ?= v0.0.0-verify
+release-verify:
+	TARGETS="linux/amd64 darwin/arm64" scripts/release.sh $(VERIFY_VERSION) dist-verify-a >/dev/null
+	TARGETS="linux/amd64 darwin/arm64" scripts/release.sh $(VERIFY_VERSION) dist-verify-b >/dev/null
+	cmp dist-verify-a/SHA256SUMS dist-verify-b/SHA256SUMS && echo "release-verify: archives are reproducible"
+	rm -rf dist-verify-a dist-verify-b
+
 clean:
-	rm -rf bin dist
+	rm -rf bin dist dist-verify-a dist-verify-b

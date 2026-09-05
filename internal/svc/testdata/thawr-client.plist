@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>thawr-client</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/thawr</string>
+		<string>client</string>
+		<string>up</string>
+		<string>--state-dir</string>
+		<string>/var/lib/thawr/client</string>
+		<string>--socket</string>
+		<string>/var/run/thawr/client.sock</string>
+		<string>--interface</string>
+		<string>thawr0</string>
+		<string>--log-level</string>
+		<string>info</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>2</integer>
+	<key>StandardOutPath</key>
+	<string>/Library/Logs/Thawr/thawr-client.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/Thawr/thawr-client.log</string>
+</dict>
+</plist>

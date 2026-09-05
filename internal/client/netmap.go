@@ -33,6 +33,8 @@ type NetMap struct {
 	Peers      []Peer    `json:"peers"`
 	Hub        HubPeer   `json:"hub"`
 	ReceivedAt time.Time `json:"received_at"`
+	// ServerVersion is what the server reported about itself.
+	ServerVersion string `json:"server_version"`
 	// STUN lists the server's STUN listeners as host:port.
 	STUN []string `json:"stun"`
 	// Filter is the receiver-side policy: who may reach this device on
@@ -127,17 +129,18 @@ type HubPeer struct {
 // NetMapFromProto converts a received netmap.
 func NetMapFromProto(m *thawrv1.NetMap, now time.Time) NetMap {
 	nm := NetMap{
-		Generation: m.GetGeneration(),
-		SelfID:     m.GetSelf().GetId(),
-		SelfName:   m.GetSelf().GetName(),
-		SelfKind:   m.GetSelf().GetKind(),
-		SelfIPv4:   m.GetSelf().GetIpv4(),
-		Overlay:    m.GetSelf().GetOverlayCidr(),
-		Peers:      []Peer{},
-		Hub:        HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...)},
-		ReceivedAt: now,
-		STUN:       append([]string{}, m.GetSelf().GetStunAddrs()...),
-		Filter:     []FilterRule{},
+		Generation:    m.GetGeneration(),
+		SelfID:        m.GetSelf().GetId(),
+		SelfName:      m.GetSelf().GetName(),
+		SelfKind:      m.GetSelf().GetKind(),
+		SelfIPv4:      m.GetSelf().GetIpv4(),
+		Overlay:       m.GetSelf().GetOverlayCidr(),
+		Peers:         []Peer{},
+		Hub:           HubPeer{PublicKey: m.GetHub().GetPublicKey(), Endpoint: m.GetHub().GetEndpoint(), AllowedIPs: append([]string{}, m.GetHub().GetAllowedIps()...)},
+		ReceivedAt:    now,
+		ServerVersion: m.GetServerVersion(),
+		STUN:          append([]string{}, m.GetSelf().GetStunAddrs()...),
+		Filter:        []FilterRule{},
 	}
 	for _, f := range m.GetFilter() {
 		if f.GetPortLo() > 65535 || f.GetPortHi() > 65535 {

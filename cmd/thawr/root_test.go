@@ -28,8 +28,8 @@ func TestVersion(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("version: %v", err)
 	}
-	if got, want := out.String(), "thawr dev\n"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	if got := out.String(); !strings.HasPrefix(got, "thawr dev (go1.") || !strings.HasSuffix(got, ")\n") {
+		t.Errorf("got %q, want thawr dev (go..., os/arch...)", got)
 	}
 }
 
