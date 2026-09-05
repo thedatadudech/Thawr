@@ -29,6 +29,11 @@ func TestMobileConfigRender(t *testing.T) {
 	if got != want {
 		t.Errorf("config:\n%s\nwant:\n%s", got, want)
 	}
+	hub.DNS = netip.MustParseAddr("100.64.0.1")
+	got = renderWireGuardConf(key, "100.64.0.21", hub)
+	if !strings.Contains(got, "\nAddress = 100.64.0.21/32\nDNS = 100.64.0.1, thawr\n\n[Peer]") {
+		t.Errorf("config with dns:\n%s", got)
+	}
 }
 
 func TestMobileEndpoint(t *testing.T) {
@@ -98,7 +103,8 @@ func TestQRRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conf := renderWireGuardConf(key, "100.64.0.21", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820", Overlay: netip.MustParsePrefix("100.64.0.0/10")})
+	conf := renderWireGuardConf(key, "100.64.0.21", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820",
+		Overlay: netip.MustParsePrefix("100.64.0.0/10"), DNS: netip.MustParseAddr("100.64.0.1")})
 	q, err := qrcode.New(conf, qrcode.Medium)
 	if err != nil {
 		t.Fatal(err)

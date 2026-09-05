@@ -27,6 +27,18 @@ type Config struct {
 	// MinClientVersion is MAJOR.MINOR; empty means the server's own.
 	MinClientVersion string `yaml:"min_client_version"`
 	Relay            Relay  `yaml:"relay"`
+	DNS              DNS    `yaml:"dns"`
+}
+
+// DNS configures the hub resolver: <name>.thawr for phones and any
+// peer that asks the hub address (spec 010).
+type DNS struct {
+	// Enabled binds the resolver on the hub address, port 53.
+	Enabled bool `yaml:"enabled"`
+	// Upstream lists the resolvers queries outside the zone are
+	// forwarded to (IP or IP:port). Empty means the nameservers of the
+	// server host's /etc/resolv.conf, read at start.
+	Upstream []string `yaml:"upstream"`
 }
 
 // Relay tunes the packet relay built into the server.
@@ -101,6 +113,7 @@ func Default() *Config {
 			Interface: DefaultInterface(),
 		},
 		TLS:         TLS{Mode: TLSModeSelfSigned},
+		DNS:         DNS{Enabled: true},
 		PolicyFile:  "/etc/thawr/policy.yaml",
 		AdminSocket: filepath.Join(DefaultDataDir, "admin.sock"),
 		Log:         Log{Level: "info", Format: "text"},
@@ -145,6 +158,32 @@ func (c *Config) STUNEndpoints() []string {
 		out = append(out, net.JoinHostPort(c.PublicHost(), port))
 	}
 	return out
+}
+
+// DNSUpstreams parses dns.upstream; entries without a port get 53. It
+// panics only on an unvalidated config, a programmer error.
+func (c *Config) DNSUpstreams() []netip.AddrPort {
+	out := make([]netip.AddrPort, 0, len(c.DNS.Upstream))
+	for _, u := range c.DNS.Upstream {
+		ap, err := parseUpstream(u)
+		if err != nil {
+			panic("config: DNSUpstreams on unvalidated config: " + err.Error())
+		}
+		out = append(out, ap)
+	}
+	return out
+}
+
+// parseUpstream accepts an IP or an IP:port and defaults the port to 53.
+func parseUpstream(s string) (netip.AddrPort, error) {
+	if a, err := netip.ParseAddr(s); err == nil {
+		return netip.AddrPortFrom(a, 53), nil
+	}
+	ap, err := netip.ParseAddrPort(s)
+	if err != nil {
+		return netip.AddrPort{}, fmt.Errorf("%q is not an IP or IP:port", s)
+	}
+	return ap, nil
 }
 
 // HubEndpoint is the public host joined with the WireGuard listen port,

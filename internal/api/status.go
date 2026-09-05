@@ -15,6 +15,8 @@ type Status struct {
 	OnlinePeers      int    `json:"online_peers"`
 	TLSFingerprint   string `json:"tls_fingerprint"`
 	HubPublicKey     string `json:"hub_public_key"`
+	// DNSListen is the hub resolver's ip:port, empty when disabled.
+	DNSListen string `json:"dns_listen"`
 	// Relay holds the packet relay counters.
 	Relay relay.Stats `json:"relay"`
 }

@@ -67,6 +67,9 @@ func testConfig(t *testing.T) (*config.Config, string) {
 	cfg.AdminSocket = filepath.Join(dir, "admin.sock")
 	cfg.PolicyFile = filepath.Join(dir, "policy.yaml")
 	cfg.Log.Level = "debug"
+	// The fake device carries no hub address to bind; the DNS test
+	// enables the resolver with a loopback listener.
+	cfg.DNS.Enabled = false
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("test config invalid: %v", err)
 	}
@@ -91,15 +94,19 @@ type harness struct {
 	done   chan error
 }
 
-func newHarness(t *testing.T, cfg *config.Config) *harness {
+func newHarness(t *testing.T, cfg *config.Config, mods ...func(*Deps)) *harness {
 	t.Helper()
 	logs := &syncBuffer{}
 	fake := wgtest.New(cfg.Overlay.Interface)
-	srv, err := New(cfg, Deps{
+	deps := Deps{
 		OpenDevice: func(context.Context, wg.Options) (wg.Device, error) { return fake, nil },
 		Logger:     NewLogger(cfg.Log, logs),
 		Version:    "test",
-	})
+	}
+	for _, m := range mods {
+		m(&deps)
+	}
+	srv, err := New(cfg, deps)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
