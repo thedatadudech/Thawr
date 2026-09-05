@@ -139,6 +139,20 @@ func installService(ctx context.Context, w io.Writer, m svc.Manager, s svc.Servi
 	return err
 }
 
+// refuseHubHost rejects a client on a host that runs the server: both
+// would claim the overlay route, and whichever interface comes up first
+// swallows the other's traffic. The hub is already a peer on this host.
+func refuseHubHost(ctx context.Context, m svc.Manager) error {
+	state, err := m.Status(ctx, serviceServer)
+	if err != nil {
+		return err
+	}
+	if state == svc.Absent {
+		return nil
+	}
+	return &exitError{code: exitConfigError, err: fmt.Errorf("%s is installed here: a host running the server is already a peer (the hub) and cannot also run a client; install the client on another machine", serviceServer)}
+}
+
 // uninstallService stops and unregisters name, then, with purge, deletes
 // the paths purgePaths names. A purge without --yes fails before
 // anything is touched.
@@ -302,12 +316,15 @@ Requires root.`,
 			if err != nil {
 				return &exitError{code: exitConfigError, err: err}
 			}
-			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
-			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
-				return err
-			}
 			m, err := openManager(deps, cmd.ErrOrStderr())
 			if err != nil {
+				return err
+			}
+			if err := refuseHubHost(cmd.Context(), m); err != nil {
+				return err
+			}
+			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
+			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
 			}
 			return installService(cmd.Context(), cmd.OutOrStdout(), m, svc.Service{

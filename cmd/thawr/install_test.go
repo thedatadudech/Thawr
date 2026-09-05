@@ -16,7 +16,9 @@ import (
 
 // fakeManager records calls and serves a scripted state.
 type fakeManager struct {
-	state     svc.State
+	state svc.State
+	// states overrides state for particular service names.
+	states    map[string]svc.State
 	calls     *[]string
 	installed []svc.Service
 	err       error
@@ -39,8 +41,13 @@ func (m *fakeManager) Uninstall(_ context.Context, name string) error {
 	*m.calls = append(*m.calls, "uninstall "+name)
 	return m.err
 }
-func (m *fakeManager) Status(context.Context, string) (svc.State, error) { return m.state, nil }
-func (m *fakeManager) Logs(name string) string                           { return "journalctl -u " + name }
+func (m *fakeManager) Status(_ context.Context, name string) (svc.State, error) {
+	if st, ok := m.states[name]; ok {
+		return st, nil
+	}
+	return m.state, nil
+}
+func (m *fakeManager) Logs(name string) string { return "journalctl -u " + name }
 
 // enrolledState is a complete state.json for an already enrolled device.
 func enrolledState() client.State {
@@ -195,6 +202,18 @@ func TestClientInstallEnrolsBeforeWritingUnit(t *testing.T) {
 	}
 }
 
+func TestClientInstallRefusesHubHost(t *testing.T) {
+	env := newInstallEnv(t)
+	env.mgr.states = map[string]svc.State{serviceServer: svc.Running}
+	_, errOut, code := env.run(t, "client", "install", "--state-dir", t.TempDir(), "--server", "https://s", "--token", "thawr_t")
+	if code != exitConfigError || !strings.Contains(errOut, "already a peer") {
+		t.Errorf("code %d: %s", code, errOut)
+	}
+	if len(env.calls) != 0 {
+		t.Errorf("enrolled or installed despite the hub: %v", env.calls)
+	}
+}
+
 func TestClientInstallAlreadyInstalledAndEnrolled(t *testing.T) {
 	env := newInstallEnv(t)
 	stateDir := t.TempDir()
@@ -210,14 +229,14 @@ func TestClientInstallAlreadyInstalledAndEnrolled(t *testing.T) {
 		t.Errorf("calls: %s", got)
 	}
 	// Installed: reported, nothing changed, exit 0.
-	env.mgr.state = svc.Running
+	env.mgr.states = map[string]svc.State{serviceClient: svc.Running}
 	env.calls = nil
 	out, _, code = env.run(t, "client", "install", "--state-dir", stateDir)
 	if code != 0 || !strings.Contains(out, "already installed (running)") || len(env.calls) != 0 {
 		t.Errorf("code %d, calls %v: %s", code, env.calls, out)
 	}
 	// Not enrolled and no token: usage error before anything runs.
-	env.mgr.state = svc.Absent
+	env.mgr.states = nil
 	if _, errOut, code := env.run(t, "client", "install", "--state-dir", t.TempDir()); code != exitConfigError || !strings.Contains(errOut, "--server and --token") {
 		t.Errorf("code %d: %s", code, errOut)
 	}
