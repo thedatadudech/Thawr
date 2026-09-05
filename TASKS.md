@@ -361,6 +361,12 @@ entry.
         and shown after the server address; the update hint compares
         MAJOR.MINOR through `control.NewerMajorMinor`, and dev builds
         never trigger it.
+      - First run on a real Intel Mac (v0.1.0-rc1): the interface now
+        defaults to `utun` on macOS for both client and server config,
+        since `thawr0` is refused there; `client ping` answers `via hub`
+        for phones instead of "unknown peer" (they have no path machine);
+        `client status` without sudo needs the `thawr` group
+        (`dseditgroup`), documented in the README.
       - Verified on this box with the real binary and a fake `systemctl`
         on PATH (no systemd PID 1 here): `server install --public-addr`
         wrote the config (0640) and unit, ran daemon-reload, enable,

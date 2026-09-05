@@ -126,4 +126,12 @@ func TestStaticPeerViaHub(t *testing.T) {
 	if f, ok := fake.LastFilter(); !ok || !slices.Contains(f.Visible, netip.MustParseAddr("100.64.0.21")) {
 		t.Errorf("filter visible set lacks the phone: %+v", f.Visible)
 	}
+	// A phone has no path of its own: ping answers "hub" without probing.
+	res, err := NewLocalClient(d.opts.Socket).Ping(context.Background(), "markus-phone")
+	if err != nil || res.State != PathHub || res.Peer != "markus-phone" || res.Endpoint != "" {
+		t.Errorf("ping via-hub peer: %+v err=%v", res, err)
+	}
+	if _, err := NewLocalClient(d.opts.Socket).Ping(context.Background(), "nobody"); err == nil {
+		t.Error("ping of an unknown peer succeeded")
+	}
 }

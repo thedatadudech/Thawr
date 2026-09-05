@@ -88,7 +88,11 @@ registers `thawr-client` (systemd, launchd or a Windows service) to run
 `thawr client up` at boot; the token never reaches the service file.
 `sudo thawr client up --server ... --token ...` does the same in the
 foreground. `client up` enrols the device on first run and then keeps
-the WireGuard interface in sync with the server until stopped. `client status` shows
+the WireGuard interface in sync with the server until stopped. The
+client's socket is readable by root and the `thawr` group; create the
+group and add yourself (`groupadd thawr && usermod -aG thawr $USER`;
+macOS: `dseditgroup -o create thawr && dseditgroup -o edit -a $USER -t
+user thawr`) to run `client status` without sudo. `client status` shows
 in one table whether the control connection, the path to a peer or the
 policy is the problem (`--json` for scripts, validated by
 `docs/status.schema.json`; exit codes 0 connected, 1 server unreachable,

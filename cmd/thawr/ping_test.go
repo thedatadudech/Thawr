@@ -80,6 +80,23 @@ func TestClientPingTriggersProbe(t *testing.T) {
 	}
 }
 
+func TestClientPingViaHub(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
+		st := statusFixture()
+		st.Peers = st.Peers[2:3] // alice-phone, via hub
+		_ = json.NewEncoder(w).Encode(st)
+	})
+	mux.HandleFunc("POST /ping/{name}", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(client.PathResult{Peer: "alice-phone", State: client.PathHub})
+	})
+	sock := fakeDaemonSocket(t, mux)
+	out, code, err := runCLI(t, "client", "ping", "alice-phone", "--count", "0", "--socket", sock)
+	if code != 0 || out != "path: via hub → via hub\n" {
+		t.Errorf("exit %d err %v out %q", code, err, out)
+	}
+}
+
 func TestClientPingExitCodes(t *testing.T) {
 	sock, _ := probingDaemon(t)
 	if _, code, err := runCLI(t, "client", "ping", "ghost", "--count", "0", "--socket", sock); code != exitConfigError || !strings.Contains(err.Error(), "unknown peer") {

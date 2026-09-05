@@ -12,7 +12,7 @@ listen:
 
 overlay:
   cidr: 100.64.0.0/10
-  interface: thawr0
+  interface: thawr0              # macOS: utun (the kernel picks the number)
 
 tls:
   mode: self-signed              # self-signed | file

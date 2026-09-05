@@ -258,6 +258,22 @@ func (pp *peerPath) result() PathResult {
 	return r
 }
 
+// viaHub reports whether the current netmap lists name as a peer routed
+// through the hub.
+func (d *Daemon) viaHub(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.netmap == nil {
+		return false
+	}
+	for _, p := range d.netmap.Peers {
+		if p.Name == name && p.ViaHub {
+			return true
+		}
+	}
+	return false
+}
+
 // setPeerEndpoint points the peer at ep; readd removes it first so
 // WireGuard starts a fresh handshake immediately (its retry timer would
 // otherwise hold the next initiation for 5 s).
@@ -306,7 +322,8 @@ func (d *Daemon) reportPaths(ctx context.Context, results []PathResult) {
 
 // Ping marks traffic intent toward the named peer, lets the prober run
 // and returns the resulting path once it is settled (direct or
-// unreachable) or ctx ends.
+// unreachable) or ctx ends. A peer reached through the hub has no path
+// of its own and answers "hub" at once.
 func (d *Daemon) Ping(ctx context.Context, name string) (PathResult, error) {
 	d.pmu.Lock()
 	var target *peerPath
@@ -317,6 +334,9 @@ func (d *Daemon) Ping(ctx context.Context, name string) (PathResult, error) {
 	}
 	if target == nil {
 		d.pmu.Unlock()
+		if d.viaHub(name) {
+			return PathResult{Peer: name, State: PathHub}, nil
+		}
 		return PathResult{}, fmt.Errorf("%w: %s", ErrUnknownPeer, name)
 	}
 	target.ping = true

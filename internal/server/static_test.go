@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thedatadudech/thawr/internal/client"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/wg"
@@ -95,5 +96,49 @@ func mustAdmin(t *testing.T, h *harness) {
 	t.Helper()
 	if _, err := h.srv.users.Create(context.Background(), "markus", store.RoleAdmin, "adminpassword"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestHubFilterForwardsPhoneToAgent: the hub's forward filter must let a
+// phone reach its owner's laptop (src static, dst agent), not only the
+// laptop reach the phone. Found on the first real run: TCP from the
+// phone was dropped while pings passed through the ICMP allowance.
+func TestHubFilterForwardsPhoneToAgent(t *testing.T) {
+	cfg, _ := testConfig(t)
+	allowSelfPolicy(t, cfg)
+	h := newHarness(t, cfg)
+	h.start(t)
+	defer h.stop(t)
+	ctx := context.Background()
+	// createTokenLocal creates alice; her laptop and her phone must see
+	// each other under the self policy.
+	tok := createTokenLocal(t, cfg.AdminSocket)
+	laptop, err := client.Enroll(ctx, client.Options{Server: "https://" + h.srv.HTTPSAddr(), Token: tok, Fingerprint: h.srv.tlsFingerprint,
+		StateDir: t.TempDir(), Hostname: "alice-laptop", Version: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.srv.registry.CreateStatic(ctx, control.LocalAdmin, control.StaticRequest{OwnerName: "alice", Name: "alice-phone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone, laptopIP := netip.MustParseAddr(res.Peer.IPv4), netip.MustParseAddr(laptop.IPv4)
+	has := func(f wg.FilterSet, src, dst netip.Addr) bool {
+		for _, r := range f.Rules {
+			if r.Src.Addr() == src && r.Dst == dst && r.Proto == wg.ProtoAny && r.Lo <= 1 && r.Hi == 65535 {
+				return true
+			}
+		}
+		return false
+	}
+	waitUntil(t, "hub filter with both directions", func() bool {
+		f, ok := h.fake.LastFilter()
+		return ok && f.Hook == wg.HookForward && has(f, phone, laptopIP) && has(f, laptopIP, phone)
+	})
+	f, _ := h.fake.LastFilter()
+	for _, r := range f.Rules {
+		if r.Src.Addr() == laptopIP && r.Dst == laptopIP {
+			t.Errorf("rule with an agent on both ends does not belong on the hub: %+v", r)
+		}
 	}
 }

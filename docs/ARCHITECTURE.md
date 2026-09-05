@@ -347,8 +347,9 @@ create for any owner; members only for themselves and only with tags
 `tagOwners` grants them.
 
 The generation bump makes `followRegistry` add the phone to the hub
-interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install the
-policy's rules for it on the forward hook; the hub host forwards
+interface (`AllowedIPs = <ip>/32`) and `installHubFilter` install, on
+the forward hook, every policy rule whose source or destination is a
+static peer (the hub forwards nothing else); the hub host forwards
 between the interface and itself (Linux: `conf/<iface>/forwarding`,
 set at startup). Agent peers receive the phone as a `via_hub` netmap
 entry: no WireGuard peer of their own, its /32 routed to the hub, its
