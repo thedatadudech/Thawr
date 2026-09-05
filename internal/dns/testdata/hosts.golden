@@ -1,0 +1,5 @@
+# thawr begin
+100.64.0.1 hub.thawr
+100.64.0.3 nas.thawr
+100.64.0.7 alice-laptop.thawr
+# thawr end
