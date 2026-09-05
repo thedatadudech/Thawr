@@ -1,16 +1,25 @@
 name: release
 
 # Builds the release archives from a tag, checks that the build is
-# reproducible and publishes a GitHub Release with SHA256SUMS.
+# reproducible and publishes a GitHub Release with SHA256SUMS. Started
+# by pushing a tag, or by hand with a version: then the tag is created
+# on the built commit by the release itself.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0-rc1; the tag is created on the default branch"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
   CGO_ENABLED: "0"
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   check:
@@ -44,14 +53,29 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: refuse to re-release an existing tag by hand
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+            echo "tag $VERSION exists; pushing it is what releases it" >&2
+            exit 1
+          fi
       - name: build archives
-        run: make release VERSION="$GITHUB_REF_NAME"
+        run: make release VERSION="$VERSION"
       - name: verify reproducibility
-        run: make release-verify VERIFY_VERSION="$GITHUB_REF_NAME"
+        run: make release-verify VERIFY_VERSION="$VERSION"
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
+        # A release published by hand for this tag (GitHub's "new release"
+        # page creates the tag) gets the archives attached; otherwise the
+        # workflow creates the release, and with it the tag on the commit
+        # that was built when started by hand.
         run: |
-          prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease";; esac
-          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            prerelease=""
+            case "$VERSION" in *-*) prerelease="--prerelease";; esac
+            gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes --target "$GITHUB_SHA" $prerelease
+          fi
