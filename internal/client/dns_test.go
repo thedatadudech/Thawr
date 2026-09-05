@@ -15,12 +15,21 @@ import (
 	"github.com/thedatadudech/thawr/internal/dns"
 )
 
-// fakeRegistrar records the registrar calls in order.
+// fakeRegistrar records the registrar calls in order; fail makes
+// Register fail until cleared, blockUpdate makes Update hang until its
+// context ends (a stuck resolver tool).
 type fakeRegistrar struct {
-	mu      sync.Mutex
-	calls   []string
-	entries []dns.Entry
-	fail    error
+	mu          sync.Mutex
+	calls       []string
+	entries     []dns.Entry
+	fail        error
+	blockUpdate bool
+}
+
+func (f *fakeRegistrar) setFail(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = err
 }
 
 func (f *fakeRegistrar) Register(_ context.Context, iface string, server netip.Addr) (string, error) {
@@ -33,11 +42,16 @@ func (f *fakeRegistrar) Register(_ context.Context, iface string, server netip.A
 	return dns.MethodHosts, nil
 }
 
-func (f *fakeRegistrar) Update(_ context.Context, entries []dns.Entry) error {
+func (f *fakeRegistrar) Update(ctx context.Context, entries []dns.Entry) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "update")
 	f.entries = entries
+	block := f.blockUpdate
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -55,10 +69,12 @@ func (f *fakeRegistrar) snapshot() ([]string, []dns.Entry) {
 }
 
 // loopbackDNS binds the resolver on 127.0.0.1 instead of the overlay
-// address the fake device never carries, and remembers where.
+// address the fake device never carries, and remembers where; tests
+// can pull the TCP listener away to simulate a dying resolver.
 type loopbackDNS struct {
 	mu   sync.Mutex
 	addr string
+	tcp  net.Listener
 }
 
 func (l *loopbackDNS) listen(ctx context.Context, _ netip.AddrPort) (net.PacketConn, net.Listener, error) {
@@ -68,8 +84,15 @@ func (l *loopbackDNS) listen(ctx context.Context, _ netip.AddrPort) (net.PacketC
 	}
 	l.mu.Lock()
 	l.addr = udp.LocalAddr().String()
+	l.tcp = tcp
 	l.mu.Unlock()
 	return udp, tcp, nil
+}
+
+func (l *loopbackDNS) killTCP() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_ = l.tcp.Close()
 }
 
 func (l *loopbackDNS) resolver() *net.Resolver {
@@ -238,6 +261,122 @@ func dnsQuery(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return msg
+}
+
+// waitCalls polls the registrar until cond holds on its call list.
+func waitCalls(t *testing.T, reg *fakeRegistrar, what string, cond func([]string) bool) []string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		calls, _ := reg.snapshot()
+		if cond(calls) {
+			return calls
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: calls %v", what, calls)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestDNSRegistrationRetries: a failed registration is tried again with
+// the next netmap instead of being marked done.
+func TestDNSRegistrationRetries(t *testing.T) {
+	cp := newControlPlane(t)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	cp.enrol(dirA, "a")
+	reg := &fakeRegistrar{fail: errors.New("resolvectl: busy")}
+	lb := &loopbackDNS{}
+	d, _, stop := startDaemon(t, dirA, func(o *DaemonOptions) {
+		o.DNS = DNSOptions{Mode: DNSOn, Registrar: reg, Listen: lb.listen}
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
+	waitCalls(t, reg, "first registration attempt", func(c []string) bool {
+		return len(c) >= 2 && strings.HasPrefix(c[1], "register ")
+	})
+	st := d.Status(context.Background())
+	if st.DNS == nil || st.DNS.Method != dns.MethodNone || st.DNS.Error == "" {
+		t.Fatalf("status after failed registration: %+v", st.DNS)
+	}
+	// The next netmap retries and succeeds.
+	reg.setFail(nil)
+	cp.enrol(dirB, "b")
+	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 })
+	waitCalls(t, reg, "second registration attempt", func(c []string) bool {
+		n := 0
+		for _, call := range c {
+			if strings.HasPrefix(call, "register ") {
+				n++
+			}
+		}
+		// Every netmap before the fault cleared retried; the last attempt
+		// succeeded and was followed by the entries update.
+		return n >= 2 && c[len(c)-1] == "update"
+	})
+	if st := d.Status(context.Background()); st.DNS == nil || st.DNS.Method != dns.MethodHosts || st.DNS.Error != "" {
+		t.Errorf("status after retry: %+v", st.DNS)
+	}
+}
+
+// TestDNSDeadListenerUnregisters: when the resolver dies underneath the
+// running daemon, the OS registration is removed at once.
+func TestDNSDeadListenerUnregisters(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "a")
+	reg := &fakeRegistrar{}
+	lb := &loopbackDNS{}
+	d, _, stop := startDaemon(t, dir, func(o *DaemonOptions) {
+		o.DNS = DNSOptions{Mode: DNSOn, Registrar: reg, Listen: lb.listen}
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
+	waitCalls(t, reg, "registered", func(c []string) bool {
+		return len(c) >= 2 && strings.HasPrefix(c[1], "register ")
+	})
+	lb.killTCP()
+	waitCalls(t, reg, "unregister after the listener died", func(c []string) bool {
+		return len(c) >= 3 && c[len(c)-1] == "unregister thawr0"
+	})
+	st := d.Status(context.Background())
+	if st.DNS == nil || st.DNS.State != DNSError || st.DNS.Method != dns.MethodNone {
+		t.Errorf("status after the resolver died: %+v", st.DNS)
+	}
+	if st.Server.State == "" {
+		t.Error("daemon gone")
+	}
+}
+
+// TestDNSCleanupNotBlockedByRegistrar: a registrar call that hangs is
+// cut off by OpTimeout, so the cleanup after a dead listener still runs
+// within a bounded time instead of queueing behind it forever.
+func TestDNSCleanupNotBlockedByRegistrar(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "a")
+	reg := &fakeRegistrar{blockUpdate: true}
+	lb := &loopbackDNS{}
+	d, _, stop := startDaemon(t, dir, func(o *DaemonOptions) {
+		o.DNS = DNSOptions{Mode: DNSOn, Registrar: reg, Listen: lb.listen, OpTimeout: 300 * time.Millisecond}
+	})
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Hub.PublicKey != "" })
+	waitCalls(t, reg, "registered and updating", func(c []string) bool {
+		return len(c) >= 3 && strings.HasPrefix(c[1], "register ") && c[2] == "update"
+	})
+	// Update is now hanging under the lock; the listener dies.
+	start := time.Now()
+	lb.killTCP()
+	waitCalls(t, reg, "unregister despite a hanging update", func(c []string) bool {
+		return c[len(c)-1] == "unregister thawr0"
+	})
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("cleanup took %s behind a hanging registrar call", d)
+	}
+	if st := d.Status(context.Background()); st.DNS == nil || st.DNS.Method != dns.MethodNone {
+		t.Errorf("status after cleanup: %+v", st.DNS)
+	}
 }
 
 func TestStripZone(t *testing.T) {
