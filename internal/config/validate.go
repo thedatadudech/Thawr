@@ -107,6 +107,11 @@ func (c *Config) Validate() error {
 	if c.MinClientVersion != "" && !versionRe.MatchString(c.MinClientVersion) {
 		add("min_client_version: %q must be MAJOR.MINOR", c.MinClientVersion)
 	}
+	for i, u := range c.DNS.Upstream {
+		if _, err := parseUpstream(u); err != nil {
+			add("dns.upstream[%d]: %v", i, err)
+		}
+	}
 
 	if len(v.Problems) > 0 {
 		return &v

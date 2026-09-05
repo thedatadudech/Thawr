@@ -30,3 +30,7 @@ min_client_version: ""           # default: the server's own major.minor
 
 relay:
   max_bytes_per_second: 0        # per-peer relay rate limit; 0 = unlimited
+
+dns:
+  enabled: true                  # <name>.thawr resolver on the hub address, port 53 (phones ask it)
+  upstream: []                   # forwarders for other names; default: this host's /etc/resolv.conf

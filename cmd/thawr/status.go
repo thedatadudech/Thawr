@@ -22,7 +22,7 @@ func renderStatus(w io.Writer, st client.Status) error {
 	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT)); err != nil {
+	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS)); err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
@@ -105,6 +105,24 @@ func natLine(n client.NATStatus) string {
 		return "none (" + strings.Join(n.Reflexive, ", ") + ")"
 	default:
 		return n.Type + " (reflexive " + strings.Join(n.Reflexive, ", ") + ")"
+	}
+}
+
+// dnsLine renders the resolver segment of the header: nothing with
+// --dns off, the registration method, or why it is not serving.
+func dnsLine(d *client.DNSStatus) string {
+	switch {
+	case d == nil:
+		return ""
+	case d.State == client.DNSError:
+		return " · DNS: error (" + d.Error + ")"
+	case d.Method == "" || d.Method == "none":
+		if d.Error != "" {
+			return " · DNS: serving, not registered (" + d.Error + ")"
+		}
+		return " · DNS: serving, not registered"
+	default:
+		return " · DNS: .thawr via " + d.Method
 	}
 }
 

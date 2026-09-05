@@ -76,7 +76,7 @@ func TestEnrollTwoClients(t *testing.T) {
 			t.Fatal(err)
 		}
 		server := "https://10.9." + string(rune('0'+i)) + ".1:8443"
-		out, err := ns.cmd(ctx, bin, "client", "up", "--server", server, "--token", tok.Secret, "--fingerprint", fingerprint,
+		out, err := ns.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", server, "--token", tok.Secret, "--fingerprint", fingerprint,
 			"--state-dir", filepath.Join(dir, "client"+string(rune('1'+i))), "--name", "client-"+string(rune('1'+i))).CombinedOutput()
 		if err != nil {
 			t.Fatalf("client %d up: %v\n%s", i+1, err, out)

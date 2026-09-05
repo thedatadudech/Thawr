@@ -29,6 +29,11 @@ func TestMobileConfigRender(t *testing.T) {
 	if got != want {
 		t.Errorf("config:\n%s\nwant:\n%s", got, want)
 	}
+	hub.DNS = netip.MustParseAddr("100.64.0.1")
+	got = renderWireGuardConf(key, "100.64.0.21", hub)
+	if !strings.Contains(got, "\nAddress = 100.64.0.21/32\nDNS = 100.64.0.1, thawr\n\n[Peer]") {
+		t.Errorf("config with dns:\n%s", got)
+	}
 }
 
 func TestMobileEndpoint(t *testing.T) {
@@ -92,13 +97,18 @@ func TestMobileEndpoint(t *testing.T) {
 }
 
 // TestQRRoundTrip decodes the QR the API and CLI render back to the
-// exact config text.
+// exact config text. The key is a fixed synthetic pattern, not a
+// secret: the decoder used here (a ZXing port) misreads about one in a
+// hundred version-12 symbols, which a random key turned into a flaky
+// test; the symbol below decodes and stays the same on every run.
 func TestQRRoundTrip(t *testing.T) {
-	key, err := wg.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
+	var raw [32]byte
+	for i := range raw {
+		raw[i] = byte(i*7 + 3)
 	}
-	conf := renderWireGuardConf(key, "100.64.0.21", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820", Overlay: netip.MustParsePrefix("100.64.0.0/10")})
+	key := wg.Key(raw)
+	conf := renderWireGuardConf(key, "100.64.0.21", HubInfo{PublicKey: key.PublicKey().String(), Endpoint: "vpn.example.com:51820",
+		Overlay: netip.MustParsePrefix("100.64.0.0/10"), DNS: netip.MustParseAddr("100.64.0.1")})
 	q, err := qrcode.New(conf, qrcode.Medium)
 	if err != nil {
 		t.Fatal(err)

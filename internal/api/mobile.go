@@ -8,6 +8,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/dns"
 	"github.com/thedatadudech/thawr/internal/wg"
 )
 
@@ -59,10 +60,16 @@ func (h *rest) handleCreateMobile(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderWireGuardConf renders the phone's config for the official
-// WireGuard app: its own key and address, the hub as the only peer.
+// WireGuard app: its own key and address, the hub resolver with the
+// zone as search domain when the server runs one, the hub as the only
+// peer.
 func renderWireGuardConf(priv wg.Key, ipv4 string, hub HubInfo) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s/32\n\n", priv.String(), ipv4)
+	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\nAddress = %s/32\n", priv.String(), ipv4)
+	if hub.DNS.IsValid() {
+		fmt.Fprintf(&b, "DNS = %s, %s\n", hub.DNS, dns.Zone)
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "[Peer]\nPublicKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = 25\n", hub.PublicKey, hub.Endpoint, hub.Overlay.String())
 	return b.String()
 }

@@ -212,7 +212,7 @@ func natMesh(t *testing.T, kinds []natKind, sameLAN bool) (status func(int) clie
 			t.Fatal(err)
 		}
 		name := fmt.Sprintf("client-%d", i+1)
-		d := site.client.cmd(ctx, bin, "client", "up", "--server", "https://"+serverIP+":8443", "--token", tok.Secret,
+		d := site.client.cmd(ctx, bin, "client", "up", "--dns", "serve", "--server", "https://"+serverIP+":8443", "--token", tok.Secret,
 			"--fingerprint", fingerprint, "--state-dir", filepath.Join(dir, name), "--socket", filepath.Join(dir, name+".sock"), "--name", name, "--log-level", "debug")
 		d.Stdout, d.Stderr = testWriter{t, name}, testWriter{t, name}
 		if err := d.Start(); err != nil {

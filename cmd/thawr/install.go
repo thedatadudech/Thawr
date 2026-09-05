@@ -343,13 +343,16 @@ Requires root.`,
 			if err := refuseHubHost(cmd.Context(), m); err != nil {
 				return err
 			}
+			if err := validateDNSMode(upf.dnsMode); err != nil {
+				return err
+			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
 			}
 			return installService(cmd.Context(), cmd.OutOrStdout(), m, svc.Service{
 				Name: serviceClient, Description: "Thawr node client", Exec: bin,
-				Args:           []string{"client", "up", "--state-dir", stateDir, "--socket", socket, "--interface", upf.iface, "--log-level", upf.logLevel},
+				Args:           []string{"client", "up", "--state-dir", stateDir, "--socket", socket, "--interface", upf.iface, "--log-level", upf.logLevel, "--dns", upf.dnsMode},
 				ReadWritePaths: uniquePaths(stateDir, filepath.Dir(socket)),
 			}, f.noStart)
 		},

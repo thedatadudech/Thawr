@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched) | Linux, root, iproute2, nftables |
 | `make release-verify` | Builds two targets twice and compares the archives; CI runs it on every push and before every release | Linux |
 
 The integration tests use the real binary and the WireGuard adapter that
@@ -181,3 +181,31 @@ Two devices behind different home routers, server on a public host.
    the server logs pending migrations, the client reconnects without
    re-enrolling, and a client running an older release shows
    `client update available` in `thawr client status`.
+
+## Manual checklist for names (spec 010)
+
+1. Linux with systemd-resolved: after `thawr client up`, `resolvectl
+   status thawr0` lists the client's overlay address as DNS server with
+   `~thawr` as routing domain; `getent hosts <peer>.thawr` answers;
+   `client down` leaves `resolvectl status` without the entry.
+2. Linux without systemd-resolved (Docker host, Alpine): `/etc/hosts`
+   gains the `# thawr begin` … `# thawr end` block with one line per
+   peer; every other line is byte-identical (`diff` against a copy);
+   `client down` removes the block; `client status` says `DNS: .thawr
+   via hosts`.
+3. macOS: `scutil --dns` lists a resolver for domain `thawr` after
+   `client up`; `ping <peer>.thawr` works; `/etc/resolver/thawr` is
+   gone after `client down` or `client uninstall`.
+4. Windows (untested as of spec 010): `Get-DnsClientNrptRule` shows
+   the `.thawr` namespace after `client up`; `Resolve-DnsName
+   <peer>.thawr` answers; the rule is gone after `client down`.
+5. Phone: re-scan a QR from a server with `dns.enabled` (the default);
+   the WireGuard app shows `100.64.0.1` under DNS; the browser opens
+   `http://<peer>.thawr:<port>` and ordinary websites still load
+   (forwarded through the server); a peer the policy hides does not
+   resolve.
+6. `client status` shows `DNS: .thawr via <method>`; `--json`
+   validates with the `dns` object; `--dns off` omits both.
+7. `dig @<self ip> -x 100.64.0.1` answers `hub.thawr.`;
+   `dig @<self ip> example.com` is REFUSED; the same against the hub
+   address forwards.

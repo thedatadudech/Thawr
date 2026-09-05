@@ -51,6 +51,9 @@ type HubInfo struct {
 	PublicKey string
 	Endpoint  string
 	Overlay   netip.Prefix
+	// DNS is the hub resolver phones are told to use; invalid when the
+	// server runs without one.
+	DNS netip.Addr
 }
 
 // GRPCDeps are the collaborators of the Control service. Enroller and

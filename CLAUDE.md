@@ -51,6 +51,7 @@ cmd/thawr/          entry point, subcommands server | client | admin
 internal/control/   peer registry, keys, enrollment, policy engine, netmap; path/ = candidate order + path state machine
 internal/stun/      STUN codec (copied from Tailscale), client discovery, rate-limited server
 internal/relay/     relay server and client-side relay proxy
+internal/dns/       resolver for <name>.thawr (client and hub), forwarding, split-DNS registrars
 internal/wg/        WireGuard adapter: kernel (wgctrl) and wireguard-go
 internal/store/     SQLite persistence and embedded SQL migrations
 internal/api/       gRPC (client<->server) and REST (admin UI) handlers

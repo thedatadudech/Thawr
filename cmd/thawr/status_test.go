@@ -32,6 +32,7 @@ func statusFixture() client.Status {
 		NAT:       client.NATStatus{Type: client.NATCone, Reflexive: []string{"203.0.113.9:41820"}, Local: []string{"192.168.1.20:41820"}},
 		Relay:     client.RelayStatus{Connected: true, Peers: 1},
 		Filter:    &client.FilterStatus{Rules: 3, Drops: 12, Dropped5m: 0, Flows: 2},
+		DNS:       &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "resolved", Names: 6},
 		Hub: &client.PeerStatus{Name: "hub", IPv4: "100.64.0.1", Kind: "server", Online: true, PublicKey: "HUB=", Path: "direct",
 			PathEndpoint: "vpn.example.com:51820", EndpointCandidates: []client.Candidate{}, LastHandshakeAt: at(25 * time.Second), RxBytes: 4000, TxBytes: 4200},
 		Peers: []client.PeerStatus{
@@ -89,6 +90,31 @@ func TestStatusServerVersionHint(t *testing.T) {
 		}
 		if !strings.Contains(buf.String(), tc.want) {
 			t.Errorf("server %q client %q: header %q lacks %q", tc.server, tc.client, strings.SplitN(buf.String(), "\n", 2)[0], tc.want)
+		}
+	}
+}
+
+func TestStatusDNSLine(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dns  *client.DNSStatus
+		want string
+	}{
+		{"off", nil, "NAT: cone (reflexive 203.0.113.9:41820)\n"},
+		{"registered", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "hosts", Names: 3}, "· DNS: .thawr via hosts\n"},
+		{"serve only", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none"}, "· DNS: serving, not registered\n"},
+		{"registration failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSServing, Method: "none", Error: "resolvectl: exit 1"}, "· DNS: serving, not registered (resolvectl: exit 1)\n"},
+		{"bind failed", &client.DNSStatus{Listen: "100.64.0.7:53", State: client.DNSError, Error: "address in use"}, "· DNS: error (address in use)\n"},
+	} {
+		st := statusFixture()
+		st.DNS = tc.dns
+		var buf bytes.Buffer
+		if err := renderStatus(&buf, st); err != nil {
+			t.Fatal(err)
+		}
+		line := strings.SplitN(buf.String(), "\n", 3)[1] + "\n"
+		if !strings.HasSuffix(line, tc.want) {
+			t.Errorf("%s: line %q lacks %q", tc.name, line, tc.want)
 		}
 	}
 }

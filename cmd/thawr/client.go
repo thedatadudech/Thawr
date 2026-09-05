@@ -28,8 +28,8 @@ func defaultClientSocket() string {
 
 // clientUpFlags are shared by `client up` and `client install`.
 type clientUpFlags struct {
-	serverURL, token, fingerprint, name, iface, logLevel string
-	acceptFingerprint                                    bool
+	serverURL, token, fingerprint, name, iface, logLevel, dnsMode string
+	acceptFingerprint                                             bool
 }
 
 func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
@@ -40,6 +40,15 @@ func addClientUpFlags(cmd *cobra.Command, f *clientUpFlags) {
 	cmd.Flags().StringVar(&f.name, "name", "", "peer name to request instead of the hostname")
 	cmd.Flags().StringVar(&f.iface, "interface", config.DefaultInterface(), "WireGuard interface name")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "debug, info, warn or error")
+	cmd.Flags().StringVar(&f.dnsMode, "dns", client.DNSOn, "<name>.thawr resolver: on (serve and register with the OS), serve (resolver only) or off")
+}
+
+// validateDNSMode turns a bad --dns value into a usage error.
+func validateDNSMode(mode string) error {
+	if !client.ValidDNSMode(mode) {
+		return &exitError{code: exitConfigError, err: fmt.Errorf("--dns must be on, serve or off, not %q", mode)}
+	}
+	return nil
 }
 
 // enrollIfNeeded enrols the device when stateDir holds no enrollment,
@@ -90,11 +99,15 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 --token enrol it first.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateDNSMode(upf.dnsMode); err != nil {
+				return err
+			}
 			logger := server.NewLogger(logConfig(upf.logLevel), cmd.ErrOrStderr())
 			if err := enrollIfNeeded(cmd.Context(), deps, logger, upf, stateDir); err != nil {
 				return err
 			}
-			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version})
+			d, err := client.NewDaemon(client.DaemonOptions{StateDir: stateDir, Socket: socket, Interface: upf.iface, Logger: logger, Version: version,
+				DNS: client.DNSOptions{Mode: upf.dnsMode}})
 			if err != nil {
 				return err
 			}

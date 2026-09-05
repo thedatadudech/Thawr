@@ -1,3 +1,4 @@
 # Golden files are compared byte for byte; never convert their line endings.
 cmd/thawr/testdata/* -text
 internal/svc/testdata/* -text
+internal/dns/testdata/* -text

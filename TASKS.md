@@ -378,8 +378,53 @@ entry.
         `SHA256SUMS` verified, the extracted Linux binary printed the
         tag and commit, and `make release-verify` passed. The systemd
         integration test skips here and runs on a systemd VM.
-- [ ] **010 DNS names** — `<name>.thawr` from a resolver in the client
-      fed by the netmap; per-platform registration (spec to be written).
+- [x] **010 DNS names** — `docs/specs/010-dns-names.md`
+      `<name>.thawr` from a resolver in the client fed by the netmap,
+      the same resolver on the hub for phones (with forwarding to the
+      server host's upstreams), split-DNS registration per platform.
+      - Phones are in scope (owner decision): the hub resolver forwards
+        everything outside the zone because the WireGuard app sends all
+        queries through the tunnel once `DNS =` is set. Upstreams come
+        from `dns.upstream` or the host's `/etc/resolv.conf` at start;
+        loopback stubs such as 127.0.0.53 are kept, they are the host's
+        working resolver.
+      - Linux without systemd-resolved manages an `/etc/hosts` block
+        (owner decision) instead of warning; the block carries only
+        `<name>.thawr`, not the bare name, so a peer never shadows a LAN
+        host. Registration and hosts writes happen after the first
+        netmap, preceded by an unregister that clears a crashed run.
+      - `golang.org/x/net/dns/dnsmessage` is the codec (already in the
+        module graph, BSD-3); no third-party DNS library.
+      - Names follow visibility: the client resolver knows only its
+        netmap, the hub resolver answers a requesting address only with
+        peers the policy makes visible to it. Loopback sources are
+        always answered so the local host and the tests can ask.
+      - `internal/dns.Handle` takes the transport (`tcp bool`) for
+        truncation and for forwarding over the arriving transport; the
+        spec's signature was amended.
+      - `--dns serve` exists for people who configure their resolver
+        themselves and for the integration suite, which shares `/etc`
+        with the host; every integration client runs with it, and the
+        mobile harness strips the phone config's `DNS =` line because
+        `wg-quick` would hand it to `resolvconf`.
+      - The server test config disables the hub resolver (the fake
+        device carries no hub address); `Deps.DNSListen` injects a
+        loopback listener where a test needs it, as `DNSOptions.Listen`
+        does on the client.
+      - `TestQRRoundTrip` uses a fixed synthetic key: with the DNS line
+        the phone config is a version-12 symbol, and the ZXing port used
+        to decode it misreads about one in a hundred random symbols
+        (measured 200 runs per EC level), which made CI flaky. The
+        encoder is unchanged; whether real scanners share the decoder's
+        limit is on the manual phone checklist.
+      - Verified here: unit tests for the codec paths, forwarding with a
+        fake dialer, every registrar against a temp root and fake
+        runner, the daemon serving names over a loopback listener, the
+        hub source honouring policy visibility; `make lint`, race tests
+        on every package, darwin/arm64 and windows/amd64 builds. The
+        netns integration tests compile and skip here (no `ip`); they
+        run on the Linux VM. macOS, Windows and a real phone are on the
+        manual checklist in TESTING.md.
 - [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
       phase 2 items (spec to be written).
 - [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated

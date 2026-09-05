@@ -13,7 +13,7 @@ each spec that touches an item below.
 | A4 Enrollment tokens | Shown once; SHA-256 in DB | Attacker can enrol a device as the token's owner with its tags |
 | A5 User passwords | argon2id hashes in DB | Admin UI takeover |
 | A6 Server TLS private key | `data_dir/tls/key.pem` | Control-channel interception if fingerprint pinning is bypassed |
-| A7 Netmap (peer list, IPs, endpoints, public keys) | Server memory, DB, client cache | Network topology disclosure; endpoints reveal locations |
+| A7 Netmap (peer list, IPs, endpoints, public keys) | Server memory, DB, client cache; the `.thawr` resolvers answer from it and only to the extent the policy makes a peer visible to the asker | Network topology disclosure; endpoints reveal locations |
 | A8 Policy file | User's git repo, server memory | Wrong policy grants or denies access |
 | A9 Data-plane traffic | Between peers | Confidentiality and integrity of user data |
 | A10 SQLite database | `data_dir/thawr.db` | All of A3–A8 hashes and metadata |

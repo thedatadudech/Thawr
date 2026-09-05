@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -171,6 +172,11 @@ func startDaemon(t *testing.T, dir string, mods ...func(*DaemonOptions)) (*Daemo
 		ProbeTick: 20 * time.Millisecond, IdleTick: 50 * time.Millisecond,
 		Trigger: func(context.Context, string, netip.Addr, netip.Addr) error { return nil },
 		Relay:   relay.ClientOptions{MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, ReleaseDelay: 20 * time.Millisecond, IdleTimeout: 200 * time.Millisecond},
+		// The fake device carries no address to bind; tests that need
+		// the resolver inject a loopback listener.
+		DNS: DNSOptions{Mode: DNSServe, Listen: func(context.Context, netip.AddrPort) (net.PacketConn, net.Listener, error) {
+			return nil, nil, errors.New("no overlay address in tests")
+		}},
 	}
 	for _, m := range mods {
 		m(&opts)

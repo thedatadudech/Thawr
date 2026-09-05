@@ -29,10 +29,12 @@ type Status struct {
 	Relay     RelayStatus  `json:"relay"`
 	// Filter reports the receiver-side policy filter when the device
 	// supports one.
-	Filter      *FilterStatus `json:"filter,omitempty"`
-	Hub         *PeerStatus   `json:"hub,omitempty"`
-	Peers       []PeerStatus  `json:"peers"`
-	RetrievedAt time.Time     `json:"retrieved_at"`
+	Filter *FilterStatus `json:"filter,omitempty"`
+	// DNS reports the <name>.thawr resolver; absent with --dns off.
+	DNS         *DNSStatus   `json:"dns,omitempty"`
+	Hub         *PeerStatus  `json:"hub,omitempty"`
+	Peers       []PeerStatus `json:"peers"`
+	RetrievedAt time.Time    `json:"retrieved_at"`
 }
 
 // SelfStatus identifies this device.
@@ -170,6 +172,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	st.NAT = natStatus(d.selfAddrs, d.selfEndpoints, d.selfSymmetric)
 	d.pmu.Unlock()
 	st.Relay = RelayStatus{Connected: d.relay.Connected(), Peers: d.relay.Peers()}
+	st.DNS = d.dnsStatus()
 	stats := map[string]wg.PeerStats{}
 	if dev != nil {
 		st.WireGuard.Backend = dev.Backend()

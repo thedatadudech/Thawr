@@ -23,6 +23,7 @@ import (
 	"github.com/thedatadudech/thawr/internal/config"
 	"github.com/thedatadudech/thawr/internal/control"
 	"github.com/thedatadudech/thawr/internal/control/policy"
+	"github.com/thedatadudech/thawr/internal/dns"
 	"github.com/thedatadudech/thawr/internal/relay"
 	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/stun"
@@ -52,6 +53,9 @@ type Deps struct {
 	// ObserveInterval is how often the hub interface's peer endpoints
 	// are read into the endpoint table (15 s).
 	ObserveInterval time.Duration
+	// DNSListen binds the hub resolver; defaults to dns.Listen (tests
+	// bind loopback, the fake device carries no hub address).
+	DNSListen func(ctx context.Context, addr netip.AddrPort) (net.PacketConn, net.Listener, error)
 }
 
 // Server is the composed control server.
@@ -83,6 +87,8 @@ type Server struct {
 	paths     *control.PathTable
 	netmaps   *control.NetMapBuilder
 	relay     *relay.Server
+	dnsSource *registrySource
+	dnsListen string
 
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -110,6 +116,9 @@ func New(cfg *config.Config, deps Deps) (*Server, error) {
 	}
 	if deps.Version == "" {
 		deps.Version = "dev"
+	}
+	if deps.DNSListen == nil {
+		deps.DNSListen = dns.Listen
 	}
 	if deps.ObserveInterval <= 0 {
 		deps.ObserveInterval = 15 * time.Second
@@ -203,9 +212,18 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	if err := s.buildServices(ctx); err != nil {
 		return err
 	}
+	stopDNS, err := s.startDNS(ctx)
+	if err != nil {
+		return err
+	}
+	defer stopDNS()
+	hubInfo := api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()}
+	if cfg.DNS.Enabled {
+		hubInfo.DNS = cfg.HubAddr().Addr()
+	}
 	grpcSrv, err := api.NewGRPC(api.GRPCDeps{
 		Enroller:  s.enroller,
-		Hub:       api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: cfg.HubEndpoint(), Overlay: cfg.OverlayPrefix()},
+		Hub:       hubInfo,
 		Version:   s.deps.Version,
 		Logger:    s.log,
 		NodeAuth:  s.registry,
@@ -222,7 +240,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
 		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
-		Hub: api.HubInfo{PublicKey: s.hubKey.PublicKey().String(), Endpoint: s.cfg.HubEndpoint(), Overlay: s.cfg.OverlayPrefix()},
+		Hub: hubInfo,
 	}
 	webHandler, err := api.NewREST(restDeps)
 	if err != nil {
@@ -275,7 +293,8 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 		"public_addr", cfg.PublicAddr,
 		"tls_fingerprint", s.tlsFingerprint,
 		"hub_public_key", s.hubKey.PublicKey().String(),
-		"hub_endpoint", cfg.HubEndpoint())
+		"hub_endpoint", cfg.HubEndpoint(),
+		"dns", s.dnsListen)
 	s.readyOnce.Do(func() { close(s.ready) })
 
 	for {
@@ -538,6 +557,7 @@ func (s *Server) Status(ctx context.Context) (api.Status, error) {
 		PeerCount:      count,
 		TLSFingerprint: s.tlsFingerprint,
 		HubPublicKey:   s.hubKey.PublicKey().String(),
+		DNSListen:      s.dnsListen,
 	}
 	if s.relay != nil {
 		st.Relay = s.relay.Stats()
@@ -601,6 +621,7 @@ func (s *Server) buildServices(ctx context.Context) error {
 		Overlay:   s.cfg.OverlayPrefix(),
 		STUNAddrs: s.cfg.STUNEndpoints(),
 	}, hub.Generation)
+	s.dnsSource = newRegistrySource(s.st, visibility, hub.Generation, s.cfg.HubAddr().Addr())
 	return nil
 }
 
