@@ -31,9 +31,12 @@ type Status struct {
 	// supports one.
 	Filter *FilterStatus `json:"filter,omitempty"`
 	// DNS reports the <name>.thawr resolver; absent with --dns off.
-	DNS         *DNSStatus   `json:"dns,omitempty"`
-	Hub         *PeerStatus  `json:"hub,omitempty"`
-	Peers       []PeerStatus `json:"peers"`
+	DNS   *DNSStatus   `json:"dns,omitempty"`
+	Hub   *PeerStatus  `json:"hub,omitempty"`
+	Peers []PeerStatus `json:"peers"`
+	// Held lists the netmap entries whose key differs from the pinned
+	// one; each also appears in Peers (or Hub) with path key_changed.
+	Held        []HeldStatus `json:"held"`
 	RetrievedAt time.Time    `json:"retrieved_at"`
 }
 
@@ -120,6 +123,9 @@ type Candidate struct {
 const (
 	PathOffline = "offline"
 	PathHub     = "hub"
+	// PathKeyChanged marks a peer held out of the tunnel because its
+	// key differs from the pinned one (spec 011).
+	PathKeyChanged = "key_changed"
 )
 
 // PeerStatus joins netmap knowledge with device counters.
@@ -151,7 +157,7 @@ const hubStale = 3 * time.Minute
 func (d *Daemon) Status(ctx context.Context) Status {
 	now := d.opts.Now()
 	d.mu.Lock()
-	nm, dev := d.netmap, d.dev
+	nm, dev, held := d.netmap, d.dev, d.held
 	srv := ServerStatus{Addr: d.state.Server, State: ServerReconnecting, Attempt: d.attempt, LastError: d.lastError,
 		NextRetryAt: timePtr(d.nextRetryAt), UnreachableSince: timePtr(d.unreachableSince), LastMessageAt: timePtr(d.lastMessage)}
 	if d.connected {
@@ -166,7 +172,17 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		Server:    srv,
 		WireGuard: WGStatus{Interface: d.opts.Interface, ListenPort: d.state.ListenPort},
 		NAT:       NATStatus{Type: NATUnknown, Reflexive: []string{}, Local: []string{}},
-		Peers:     []PeerStatus{}, RetrievedAt: now,
+		Peers:     []PeerStatus{}, Held: []HeldStatus{}, RetrievedAt: now,
+	}
+	for _, h := range held {
+		st.Held = append(st.Held, h)
+		ps := PeerStatus{Name: h.Name, IPv4: h.IPv4, Kind: h.Kind, Owner: h.Owner, PublicKey: h.OfferedKey, Path: PathKeyChanged, EndpointCandidates: []Candidate{}}
+		if h.Name == HubName {
+			ps.Online = true
+			st.Hub = &ps
+			continue
+		}
+		st.Peers = append(st.Peers, ps)
 	}
 	d.pmu.Lock()
 	st.NAT = natStatus(d.selfAddrs, d.selfEndpoints, d.selfSymmetric)
@@ -295,6 +311,18 @@ func (d *Daemon) localHandler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("POST /trust/{name}", func(w http.ResponseWriter, r *http.Request) {
+		accepted, err := d.Trust(r.Context(), []string{r.PathValue("name")})
+		switch {
+		case errors.Is(err, ErrNotHeld):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		case err != nil:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, TrustResult{Trusted: accepted})
+	})
 	mux.HandleFunc("POST /rotate-key", func(w http.ResponseWriter, r *http.Request) {
 		if err := d.RotateKey(r.Context()); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -342,6 +370,18 @@ func (c *LocalClient) Down(ctx context.Context) error {
 // RotateKey asks the daemon to rotate its WireGuard key.
 func (c *LocalClient) RotateKey(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/rotate-key", nil)
+}
+
+// TrustResult lists the entries a trust call accepted.
+type TrustResult struct {
+	Trusted []HeldStatus `json:"trusted"`
+}
+
+// Trust asks the daemon to accept the offered key of a held peer
+// ("all" for every held one, "hub" for the hub).
+func (c *LocalClient) Trust(ctx context.Context, name string) (TrustResult, error) {
+	var res TrustResult
+	return res, c.do(ctx, http.MethodPost, "/trust/"+url.PathEscape(name), &res)
 }
 
 // Ping asks the daemon to establish a path to the named peer and

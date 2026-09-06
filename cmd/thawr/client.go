@@ -148,11 +148,12 @@ SIGINT or SIGTERM. When the device is not enrolled yet, --server and
 				return err
 			}
 			_ = os.Remove(stateDirFile(stateDir, client.NetMapFile))
+			_ = os.Remove(stateDirFile(stateDir, client.PinsFile))
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "forgot enrollment as %s (%s); the server still lists the peer until an admin deletes it\n", st.Name, st.IPv4)
 			return err
 		},
 	}
-	down.Flags().BoolVar(&forget, "forget", false, "remove node.key, state.json and the netmap cache")
+	down.Flags().BoolVar(&forget, "forget", false, "remove node.key, state.json, the netmap cache and the pinned keys")
 	addClientCommonFlags(down, &stateDir, &socket)
 
 	var asJSON, watch bool

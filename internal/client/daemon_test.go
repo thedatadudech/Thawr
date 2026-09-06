@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -437,4 +438,124 @@ func TestLocalEndpoints(t *testing.T) {
 		}
 	}
 	var _ http.Handler = http.NewServeMux()
+}
+
+// TestDaemonHoldsChangedKey: a peer whose key changes on the server is
+// held out of the device, DNS and paths until trusted over the socket.
+func TestDaemonHoldsChangedKey(t *testing.T) {
+	cp := newControlPlane(t)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	cp.enrol(dirA, "a")
+	stB := cp.enrol(dirB, "b")
+	d, fake, stop := startDaemon(t, dirA)
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 1 })
+	last, _ := fake.Last()
+	if len(last.Peers) != 2 {
+		t.Fatalf("device peers before rotation: %d", len(last.Peers))
+	}
+
+	rotated, _ := wg.GenerateKey()
+	if _, err := cp.registry.RotateKey(context.Background(), stB.PeerID, rotated.PublicKey().String()); err != nil {
+		t.Fatal(err)
+	}
+	waitApplied(t, d, func(nm NetMap) bool { return len(nm.Peers) == 0 })
+	last, _ = fake.Last()
+	if len(last.Peers) != 1 {
+		t.Errorf("held peer still on the device: %+v", last.Peers)
+	}
+	lc := NewLocalClient(d.opts.Socket)
+	st, err := lc.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Held) != 1 || st.Held[0].Name != "b" || st.Held[0].OfferedKey != rotated.PublicKey().String() || st.Held[0].IPv4 != stB.IPv4 {
+		t.Fatalf("held: %+v", st.Held)
+	}
+	if len(st.Peers) != 1 || st.Peers[0].Path != PathKeyChanged || st.Peers[0].PublicKey != rotated.PublicKey().String() {
+		t.Errorf("peer row: %+v", st.Peers)
+	}
+	if _, err := d.Ping(context.Background(), "b"); !errors.Is(err, ErrUnknownPeer) {
+		t.Errorf("ping of a held peer: %v", err)
+	}
+	for _, e := range d.dnsEntries() {
+		if e.Name == "b" {
+			t.Error("held peer still resolves")
+		}
+	}
+	if _, err := lc.Trust(context.Background(), "nas"); err == nil {
+		t.Error("trusting an unknown name succeeded")
+	} else if le := new(LocalError); !errors.As(err, &le) || le.Status != http.StatusNotFound {
+		t.Errorf("unknown name: %v", err)
+	}
+
+	res, err := lc.Trust(context.Background(), "b.thawr")
+	if err != nil || len(res.Trusted) != 1 || res.Trusted[0].Name != "b" {
+		t.Fatalf("trust: %+v err=%v", res, err)
+	}
+	last, _ = fake.Last()
+	if len(last.Peers) != 2 || (last.Peers[1].PublicKey != rotated.PublicKey() && last.Peers[0].PublicKey != rotated.PublicKey()) {
+		t.Errorf("device after trust: %+v", last.Peers)
+	}
+	if st, _ = lc.Status(context.Background()); len(st.Held) != 0 || len(st.Peers) != 1 || st.Peers[0].Path == PathKeyChanged {
+		t.Errorf("status after trust: held=%v peers=%+v", st.Held, st.Peers)
+	}
+	pins, err := LoadPins(dirA)
+	if err != nil || pins.peers["b"].Key != rotated.PublicKey().String() || pins.peers["b"].ID != stB.PeerID {
+		t.Errorf("pins after trust: %+v err=%v", pins.peers, err)
+	}
+	if _, err := lc.Trust(context.Background(), "all"); err == nil {
+		t.Error("trust --all with nothing held succeeded")
+	}
+}
+
+// TestDaemonHoldsChangedHubKey: a pinned hub key that the server no
+// longer presents leaves the device without a hub peer until trusted.
+func TestDaemonHoldsChangedHubKey(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "a")
+	pins, err := LoadPins(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := wg.GenerateKey()
+	pins.hub = old.PublicKey().String()
+	if err := pins.save(); err != nil {
+		t.Fatal(err)
+	}
+	d, fake, stop := startDaemon(t, dir)
+	defer stop()
+	waitApplied(t, d, func(nm NetMap) bool { return nm.Generation > 0 })
+	last, _ := fake.Last()
+	if len(last.Peers) != 0 {
+		t.Errorf("held hub configured: %+v", last.Peers)
+	}
+	lc := NewLocalClient(d.opts.Socket)
+	st, err := lc.Status(context.Background())
+	if err != nil || len(st.Held) != 1 || st.Held[0].Name != HubName || st.Hub == nil || st.Hub.Path != PathKeyChanged || st.Hub.IPv4 != "100.64.0.1" {
+		t.Fatalf("status with held hub: held=%+v hub=%+v err=%v", st.Held, st.Hub, err)
+	}
+	if _, err := lc.Trust(context.Background(), HubName); err != nil {
+		t.Fatal(err)
+	}
+	last, _ = fake.Last()
+	if len(last.Peers) != 1 || last.Peers[0].PublicKey != cp.hubKey.PublicKey() {
+		t.Errorf("device after trusting the hub: %+v", last.Peers)
+	}
+	if st, _ = lc.Status(context.Background()); len(st.Held) != 0 || st.Hub == nil || st.Hub.Path == PathKeyChanged {
+		t.Errorf("status after trust: %+v %+v", st.Held, st.Hub)
+	}
+}
+
+func TestNewDaemonRejectsCorruptPins(t *testing.T) {
+	cp := newControlPlane(t)
+	dir := t.TempDir()
+	cp.enrol(dir, "a")
+	if err := os.WriteFile(filepath.Join(dir, PinsFile), []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDaemon(DaemonOptions{StateDir: dir, Socket: shortSocket(t)}); err == nil || !strings.Contains(err.Error(), PinsFile) {
+		t.Errorf("corrupt pins accepted: %v", err)
+	}
 }
