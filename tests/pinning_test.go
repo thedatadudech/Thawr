@@ -34,8 +34,10 @@ func TestKeyPinningHoldsRotatedPeer(t *testing.T) {
 			time.Sleep(300 * time.Millisecond)
 		}
 	}
-	waitPeers(func(st clientStatus) bool { return len(st.Peers) == 1 && st.Peers[0].Name == "bob-box" && len(st.Held) == 0 }, "alice never saw bob")
-	if state, _, err := pingPathOnce(ctx, m.clients[0], m.bin, aliceSock, "bob-box"); err != nil || state != "direct" {
+	waitPeers(func(st clientStatus) bool {
+		return len(st.Peers) == 1 && st.Peers[0].Name == "bob-box" && len(st.Held) == 0
+	}, "alice never saw bob")
+	if state, _, err := pingPathOnce(ctx, m.clients[0], m.bin, aliceSock, "bob-box.thawr"); err != nil || state != "direct" {
 		t.Fatalf("path before rotation: %s %v", state, err)
 	}
 
@@ -60,11 +62,16 @@ func TestKeyPinningHoldsRotatedPeer(t *testing.T) {
 	if out, err := m.clients[0].cmd(ctx, m.bin, "client", "trust", "bob-box", "--socket", aliceSock).CombinedOutput(); err != nil || !strings.Contains(string(out), "trusted bob-box") {
 		t.Fatalf("trust: %v\n%s", err, out)
 	}
-	waitPeers(func(st clientStatus) bool { return len(st.Held) == 0 && len(st.Peers) == 1 && st.Peers[0].Path != "key_changed" }, "bob not released after trust")
+	waitPeers(func(st clientStatus) bool {
+		return len(st.Held) == 0 && len(st.Peers) == 1 && st.Peers[0].Path != "key_changed"
+	}, "bob not released after trust")
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		state, _, err := pingPathOnce(ctx, m.clients[0], m.bin, aliceSock, "bob-box")
+		state, endpoint, err := pingPathOnce(ctx, m.clients[0], m.bin, aliceSock, "bob-box")
 		if err == nil && state == "direct" {
+			if endpoint == "" {
+				t.Errorf("direct path without an endpoint")
+			}
 			break
 		}
 		if time.Now().After(deadline) {
