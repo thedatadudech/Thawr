@@ -432,9 +432,60 @@ entry.
         netns integration tests compile and skip here (no `ip`); they
         run on the Linux VM. macOS, Windows and a real phone are on the
         manual checklist in TESTING.md.
-- [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
-      phase 2 items (spec to be written).
-- [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated
+- [x] **011 Key pinning and audit log** — `docs/specs/011-key-pinning-and-audit-log.md`
+      Clients pin the hub key and every peer's `(id, key)` by name and
+      hold a changed key out of the tunnel until `thawr client trust`;
+      the server keeps an `audit_log` table of every control-plane
+      mutation with `thawr admin audit`, a REST endpoint and a UI
+      section (threat model T4 and T5).
+      - Split (owner decision): 011 is pinning plus audit log; signed
+        peer records with an offline admin key are 012. Hold on change
+        (owner decision): a held peer gets no WireGuard peer, filter
+        rule, name or probe until accepted; nothing is applied "with a
+        warning".
+      - Pins are keyed by name and carry `(id, key)`. A rename copies
+        the pin to the new name and keeps the old one, so a later peer
+        taking a known name is held rather than trusted on first
+        contact; the plan said "move", copying closes that gap. Pins
+        are never pruned by absence for the same reason.
+      - The daemon keeps the netmap as received (`offered`) next to the
+        filtered one it applied; DNS, filter, paths and status all read
+        the filtered map, so holding needed no change in those paths.
+        The cache on disk is the received map; held entries are derived
+        again from the pins on start. A corrupt `pins.json` is a
+        start-up error, never a reset.
+      - `rotate-key` prints the `trust` reminder; the rotating device
+        cannot vouch for its new key without signing (rule 1), so other
+        devices hold it until a person accepts. 012 removes that step
+        for admin-signed rotations.
+      - Audit rows are appended through the transaction-bound store so
+        they commit with the mutation, and a failed append fails the
+        mutation (tested by dropping the table under the service). The
+        nil `*Auditor` is a no-op so tests and tools without one keep
+        working. `PolicyService.Reload` gained the principal.
+      - Logins are audited too (ok and failed, the latter as role
+        `anonymous`); rate-limited attempts are not, so the limiter
+        also bounds audit growth. Failed-login rows are the one place a
+        stranger's input (the attempted name) lands in the table.
+      - Retention is a daily pruner on the server with an injectable
+        interval; the REST `since` filter accepts a duration or an
+        RFC 3339 time and uses the server's clock.
+      - Windows CI: `TestRelayNeverLogsPayload` read the log buffer as
+        soon as the session count dropped, before the close line was
+        written; it now waits for the line. A pre-existing race in the
+        relay test, not touched by the spec.
+      - Verified here: pins rules, daemon hold/trust for a peer and the
+        hub against the fake device, CLI trust and status rendering,
+        store list/filter/cursor/prune, every audit action with actor
+        and target, the endpoint's authorisation and filters, the
+        admin command, the server pruner over the admin socket; `make
+        lint`, race tests on every package. The netns integration test
+        compiles and skips here; it runs on the Linux VM. The UI
+        section and the two-device flow are on the manual checklist.
+- [ ] **012 Network lock** — signed peer records with an admin-held
+      offline key (Ed25519), the third T4 phase-2 item; signed rotations
+      pass the 011 hold (spec to be written).
+- [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
       by policy (spec to be written).
 
 ## Phase 2 candidates (not scheduled)

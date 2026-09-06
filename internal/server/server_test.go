@@ -22,6 +22,8 @@ import (
 
 	"github.com/thedatadudech/thawr/internal/api"
 	"github.com/thedatadudech/thawr/internal/config"
+	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/store"
 	"github.com/thedatadudech/thawr/internal/wg"
 	"github.com/thedatadudech/thawr/internal/wg/wgtest"
 )
@@ -371,21 +373,27 @@ func unixHTTPClient(socket string) *http.Client {
 // status code and body.
 func getStatus(t *testing.T, socket string) (int, []byte) {
 	t.Helper()
+	return adminGet(t, socket, "/api/v1/status")
+}
+
+// adminGet performs a GET over the admin socket.
+func adminGet(t *testing.T, socket, path string) (int, []byte) {
+	t.Helper()
 	client := unixHTTPClient(socket)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://thawr/api/v1/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://thawr"+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("GET status: %v", err)
+		t.Fatalf("GET %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read status body: %v", err)
+		t.Fatalf("read %s body: %v", path, err)
 	}
 	return resp.StatusCode, body
 }
@@ -552,5 +560,59 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 	}
 	if _, err := New(nil, Deps{}); err == nil {
 		t.Error("expected error for nil config")
+	}
+}
+
+// TestAuditOverAdminSocket: server mutations land in the audit log,
+// the admin socket lists them, and the pruner drops old entries.
+func TestAuditOverAdminSocket(t *testing.T) {
+	cfg, _ := testConfig(t)
+	cfg.Audit.RetentionDays = 1
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	h := newHarness(t, cfg, func(d *Deps) {
+		d.Now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+		d.AuditPruneInterval = 50 * time.Millisecond
+	})
+	h.start(t)
+	defer h.stop(t)
+	ctx := context.Background()
+	if _, err := h.srv.users.Create(ctx, control.LocalAdmin, "markus", "admin", "adminpassword"); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := h.srv.tokens.Create(ctx, control.LocalAdmin, control.TokenRequest{OwnerName: "markus", Kind: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An entry two days old must be pruned by the next tick.
+	if err := h.srv.st.Audit().Append(ctx, store.AuditEntry{At: now.Add(-48 * time.Hour), Actor: "old", ActorRole: "admin", Action: "user.create"}); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func(query string) []map[string]any {
+		t.Helper()
+		code, body := adminGet(t, cfg.AdminSocket, "/api/v1/audit"+query)
+		if code != http.StatusOK {
+			t.Fatalf("audit: %d %s", code, body)
+		}
+		var out []map[string]any
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	entries := list("?action=token.create")
+	if len(entries) != 1 || entries[0]["actor"] != "local" || entries[0]["target"] != tok.Token.ID {
+		t.Errorf("token.create entry: %+v", entries)
+	}
+	if entries := list("?action=user.create&actor=local"); len(entries) != 1 {
+		t.Errorf("user.create entry: %+v", entries)
+	}
+	waitFor(t, func() bool { return len(list("?actor=old")) == 0 })
+	if !strings.Contains(h.logs.String(), "audit: pruned old entries") {
+		t.Error("prune not logged")
+	}
+	if got := list(""); len(got) < 2 {
+		t.Errorf("recent entries pruned: %+v", got)
 	}
 }

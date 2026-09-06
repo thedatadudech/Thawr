@@ -69,10 +69,10 @@ func newRESTEnv(t *testing.T, mods ...func(*RESTDeps, *restEnv)) *restEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create(ctx, "markus", store.RoleAdmin, "adminpassword"); err != nil {
+	if _, err := users.Create(ctx, control.LocalAdmin, "markus", store.RoleAdmin, "adminpassword"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create(ctx, "alice", store.RoleMember, "alicepassword"); err != nil {
+	if _, err := users.Create(ctx, control.LocalAdmin, "alice", store.RoleMember, "alicepassword"); err != nil {
 		t.Fatal(err)
 	}
 	return env

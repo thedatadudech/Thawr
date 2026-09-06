@@ -153,6 +153,11 @@ type clientStatus struct {
 		Rules int    `json:"rules"`
 		Drops uint64 `json:"drops"`
 	} `json:"filter"`
+	Held []struct {
+		Name       string `json:"name"`
+		PinnedKey  string `json:"pinned_key"`
+		OfferedKey string `json:"offered_key"`
+	} `json:"held"`
 	Peers []struct {
 		Name               string `json:"name"`
 		IPv4               string `json:"ipv4"`

@@ -113,6 +113,10 @@ func (r *Registry) CreateStatic(ctx context.Context, by Principal, req StaticReq
 		if err := tx.Peers().Create(ctx, res.Peer); err != nil {
 			return err
 		}
+		if err := r.audit.Record(ctx, tx, by, AuditPeerCreateStatic, peerID,
+			map[string]string{"name": req.Name, "kind": kind, "owner": owner.Name, "tags": tagsDetail(tags), "ipv4": ip.String(), "key": wg.Fingerprint(key.PublicKey())}); err != nil {
+			return err
+		}
 		res.Generation, err = tx.Meta().IncrementGeneration(ctx)
 		return err
 	})

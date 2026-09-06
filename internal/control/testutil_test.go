@@ -33,7 +33,7 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 
 func mustUser(t *testing.T, users *Users, name, role string) store.User {
 	t.Helper()
-	u, err := users.Create(context.Background(), name, role, "correct horse battery")
+	u, err := users.Create(context.Background(), LocalAdmin, name, role, "correct horse battery")
 	if err != nil {
 		t.Fatalf("create user %s: %v", name, err)
 	}

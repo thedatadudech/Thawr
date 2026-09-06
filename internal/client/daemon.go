@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -137,7 +138,11 @@ type Daemon struct {
 	selfIP  netip.Addr
 
 	// devMu serialises multi-step device changes (probe re-adds).
-	devMu      sync.Mutex
+	devMu sync.Mutex
+	// applyMu serialises apply end to end, so a re-apply of the last
+	// received netmap (trust, key rotation) reads it under the same
+	// lock and can never overwrite a newer one with a stale snapshot.
+	applyMu    sync.Mutex
 	filterWarn sync.Once
 
 	// pmu guards the path prober's state.
@@ -156,10 +161,16 @@ type Daemon struct {
 	// dnsRegMu serialises resolver registration and removal.
 	dnsRegMu sync.Mutex
 
-	mu        sync.Mutex
-	key       wg.Key
-	dev       wg.Device
-	netmap    *NetMap
+	mu     sync.Mutex
+	key    wg.Key
+	dev    wg.Device
+	netmap *NetMap
+	// offered is the last netmap as received, before held entries were
+	// removed; Trust re-applies it. pins and held are what the client
+	// accepted and what it currently refuses (spec 011).
+	offered   *NetMap
+	pins      *Pins
+	held      []HeldStatus
 	connected bool
 	lastError string
 	// attempt counts failed connects since the last good one,
@@ -211,6 +222,10 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err != nil {
 		return nil, fmt.Errorf("client: address %q in state: %w", st.IPv4, err)
 	}
+	pins, err := LoadPins(opts.StateDir)
+	if err != nil {
+		return nil, err
+	}
 	tlsCfg, err := PinnedTLSConfig(st.Fingerprint)
 	if err != nil {
 		return nil, err
@@ -221,7 +236,7 @@ func NewDaemon(opts DaemonOptions) (*Daemon, error) {
 	if ro.Now == nil {
 		ro.Now = opts.Now
 	}
-	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key,
+	return &Daemon{opts: opts, log: log, state: st, overlay: overlay.Masked(), selfIP: selfIP, key: key, pins: pins,
 		mapCh: make(chan NetMap, 16), paths: map[string]*peerPath{}, pathWake: make(chan struct{}, 1), relay: relay.NewClient(ro),
 		drops: newDropWindow(5 * time.Minute)}, nil
 }
@@ -412,11 +427,47 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 	}
 }
 
-// apply configures the device from nm and caches it.
+// apply checks nm against the pins, configures the device from what
+// passed and caches the netmap as received (held entries are derived
+// again from the pins on the next start).
 func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	return d.applyLocked(ctx, nm, cache)
+}
+
+// reapply applies the last received netmap again, after a trust or a
+// key rotation changed how it must be applied. The netmap is read
+// under applyMu, so it is the newest one and no other apply can
+// interleave.
+func (d *Daemon) reapply(ctx context.Context) error {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	d.mu.Lock()
-	key, dev := d.key, d.dev
+	offered := d.offered
 	d.mu.Unlock()
+	if offered == nil {
+		return nil
+	}
+	return d.applyLocked(ctx, *offered, false)
+}
+
+// applyLocked is apply with applyMu held.
+func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
+	now := d.opts.Now()
+	d.mu.Lock()
+	key, dev, prev := d.key, d.dev, d.held
+	offered := nm
+	applied, held, err := d.pins.Apply(nm, now, prev)
+	if err == nil {
+		d.offered, d.held = &offered, held
+	}
+	d.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	d.logHeld(prev, held)
+	nm = applied
 	cfg, err := BuildConfig(nm, key, d.state.ListenPort, d.overlay)
 	if err != nil {
 		return err
@@ -435,7 +486,7 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 		d.log.Warn("path state", "err", err)
 	}
 	if cache {
-		if err := SaveNetMap(d.opts.StateDir, nm); err != nil {
+		if err := SaveNetMap(d.opts.StateDir, offered); err != nil {
 			d.log.Warn("cache netmap", "err", err)
 		}
 	}
@@ -446,6 +497,76 @@ func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
 	default:
 	}
 	return nil
+}
+
+// logHeld reports every entry that became held with this netmap and
+// every one that was released by the server changing its mind.
+func (d *Daemon) logHeld(prev, now []HeldStatus) {
+	before := map[string]string{}
+	for _, h := range prev {
+		before[h.Name] = h.OfferedKey
+	}
+	for _, h := range now {
+		if before[h.Name] != h.OfferedKey {
+			d.log.Warn("peer key changed; held until trusted", "peer", h.Name, "pinned", fingerprintOf(h.PinnedKey), "offered", fingerprintOf(h.OfferedKey), "hint", "thawr client trust "+h.Name)
+		}
+		delete(before, h.Name)
+	}
+	for name := range before {
+		d.log.Info("held peer back on its pinned key", "peer", name)
+	}
+}
+
+// Trust accepts the offered keys of the named held entries ("all" for
+// every one, HubName for the hub) and re-applies the last netmap.
+// ErrNotHeld names an entry that is not held.
+func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error) {
+	// Selection and pinning happen under one lock hold, so a netmap
+	// arriving in between cannot make Trust pin a key the server no
+	// longer offers; reapply then reads the newest netmap under the
+	// apply lock, so the device is never configured from a stale one.
+	d.mu.Lock()
+	accept, err := selectHeld(d.held, names)
+	if err != nil {
+		d.mu.Unlock()
+		return nil, err
+	}
+	for _, h := range accept {
+		if err = d.pins.Trust(h); err != nil {
+			break
+		}
+		d.log.Info("key trusted", "peer", h.Name, "was", fingerprintOf(h.PinnedKey), "now", fingerprintOf(h.OfferedKey))
+	}
+	d.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if err := d.reapply(ctx); err != nil {
+		return nil, err
+	}
+	return accept, nil
+}
+
+// selectHeld resolves names ("all", or held names with an optional
+// zone suffix) against the held list.
+func selectHeld(held []HeldStatus, names []string) ([]HeldStatus, error) {
+	var accept []HeldStatus
+	for _, name := range names {
+		name = stripZone(name)
+		if name == "all" {
+			accept = append(accept, held...)
+			continue
+		}
+		i := slices.IndexFunc(held, func(h HeldStatus) bool { return h.Name == name })
+		if i < 0 {
+			return nil, fmt.Errorf("%w: %s is not held", ErrNotHeld, name)
+		}
+		accept = append(accept, held[i])
+	}
+	if len(accept) == 0 {
+		return nil, fmt.Errorf("%w: no key is held", ErrNotHeld)
+	}
+	return accept, nil
 }
 
 // installFilter applies the netmap's receiver-side policy to the
@@ -510,14 +631,11 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	}
 	d.mu.Lock()
 	d.key = newKey
-	nm := d.netmap
 	d.mu.Unlock()
-	if nm != nil {
-		if err := d.apply(ctx, *nm, false); err != nil {
-			return err
-		}
+	if err := d.reapply(ctx); err != nil {
+		return err
 	}
-	d.log.Info("key rotated", "key", wg.Fingerprint(newKey.PublicKey()))
+	d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
 	return nil
 }
 

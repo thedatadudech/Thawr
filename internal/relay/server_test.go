@@ -269,7 +269,11 @@ func TestRelayNeverLogsPayload(t *testing.T) {
 	ca.send(Frame{Type: TypeSend, Key: newKey(t), Payload: payload}) // PEER_GONE path
 	waitFor(t, "peer gone handled", func() bool { _, ok := ca.recv(10 * time.Millisecond); return ok })
 	_ = ca.conn.Close()
-	waitFor(t, "session closed", func() bool { return srv.Stats().Sessions == 1 })
+	// The counter drops before the close line is written, so wait for
+	// the line itself rather than the count.
+	waitFor(t, "session closed", func() bool {
+		return srv.Stats().Sessions == 1 && strings.Contains(logs.String(), "relay session closed")
+	})
 	out := logs.String()
 	if !strings.Contains(out, "relay session opened") || !strings.Contains(out, "relay session closed") {
 		t.Fatalf("expected lifecycle logs, got:\n%s", out)

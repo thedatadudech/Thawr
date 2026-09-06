@@ -10,6 +10,7 @@ import (
 
 	"github.com/thedatadudech/thawr/internal/client"
 	"github.com/thedatadudech/thawr/internal/control"
+	"github.com/thedatadudech/thawr/internal/wg"
 )
 
 // maxNameWidth is the widest peer name shown before truncation.
@@ -22,7 +23,7 @@ func renderStatus(w io.Writer, st client.Status) error {
 	if _, err := fmt.Fprintf(w, "thawr %s · %s %s · server %s%s %s\n", st.Version, st.Self.Name, st.Self.IPv4, st.Server.Addr, serverVersion(st), serverState(st.Server, now)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS)); err != nil {
+	if _, err := fmt.Fprintf(w, "WireGuard: %s · %s · listen %d · NAT: %s%s%s\n\n", dash(st.WireGuard.Backend), dash(st.WireGuard.Interface), st.WireGuard.ListenPort, natLine(st.NAT), dnsLine(st.DNS), heldLine(st.Held)); err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
@@ -126,8 +127,36 @@ func dnsLine(d *client.DNSStatus) string {
 	}
 }
 
+// heldLine renders the header's key-change warning with the command
+// that clears it; empty when nothing is held.
+func heldLine(held []client.HeldStatus) string {
+	if len(held) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(held))
+	for _, h := range held {
+		names = append(names, h.Name)
+	}
+	word := "keys"
+	if len(held) == 1 {
+		word = "key"
+	}
+	return fmt.Sprintf(" · %d %s changed: thawr client trust %s", len(held), word, strings.Join(names, " "))
+}
+
+// fingerprint shortens a public key for output; an unparseable key is
+// shown as "?" rather than in full.
+func fingerprint(key string) string {
+	k, err := wg.ParseKey(key)
+	if err != nil {
+		return "?"
+	}
+	return wg.Fingerprint(k)
+}
+
 // pathColumn renders the PATH column: "direct <endpoint>", "relay",
-// "probing", "via hub", "idle", "unreachable" or "offline".
+// "probing", "via hub", "key changed", "idle", "unreachable" or
+// "offline".
 func pathColumn(p client.PeerStatus) string {
 	switch p.Path {
 	case "direct":
@@ -137,6 +166,8 @@ func pathColumn(p client.PeerStatus) string {
 		return "direct"
 	case client.PathHub:
 		return "via hub"
+	case client.PathKeyChanged:
+		return "key changed"
 	case "":
 		return "-"
 	default:
@@ -147,7 +178,7 @@ func pathColumn(p client.PeerStatus) string {
 // handshakeColumns renders HANDSHAKE and RX / TX; peers without a
 // WireGuard session of their own show "-".
 func handshakeColumns(p client.PeerStatus, now time.Time) (handshake, rxtx string) {
-	if p.Path == client.PathHub {
+	if p.Path == client.PathHub || p.Path == client.PathKeyChanged {
 		return "-", "-"
 	}
 	if p.LastHandshakeAt == nil {

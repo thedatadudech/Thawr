@@ -34,3 +34,6 @@ relay:
 dns:
   enabled: true                  # <name>.thawr resolver on the hub address, port 53 (phones ask it)
   upstream: []                   # forwarders for other names; default: this host's /etc/resolv.conf
+
+audit:
+  retention_days: 90             # audit log entries older than this are pruned daily; 0 keeps everything

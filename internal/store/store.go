@@ -61,3 +61,6 @@ func (s *Store) Users() *Users { return &Users{q: s.q()} }
 
 // Tokens returns the enrollment token accessor.
 func (s *Store) Tokens() *Tokens { return &Tokens{q: s.q()} }
+
+// Audit accesses the audit_log table.
+func (s *Store) Audit() *Audit { return &Audit{q: s.q()} }

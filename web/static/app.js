@@ -135,6 +135,38 @@
     }
   }
 
+  // The audit log pages backwards from the newest entry with before_id.
+  const auditPage = 100;
+  let auditOldest = 0;
+
+  function auditRow(e) {
+    const tr = document.createElement("tr");
+    const details = Object.keys(e.details || {}).filter((k) => e.details[k] !== "").sort().map((k) => `${k}=${e.details[k]}`).join(" ");
+    tr.append(cell(e.at), cell(e.actor), cell(e.action), cell(e.target || "-"), cell(details || "-"));
+    return tr;
+  }
+
+  async function loadAudit(older) {
+    if (me.role !== "admin") { show("#audit-section", false); return; }
+    show("#audit-section", true);
+    const params = new URLSearchParams({ limit: String(auditPage) });
+    if (older && auditOldest > 0) params.set("before_id", String(auditOldest));
+    const entries = await api("GET", `/api/v1/audit?${params}`);
+    const tbody = $("#audit tbody");
+    if (!older) { tbody.replaceChildren(); auditOldest = 0; }
+    for (const e of entries) {
+      tbody.append(auditRow(e));
+      auditOldest = auditOldest === 0 ? e.id : Math.min(auditOldest, e.id);
+    }
+    const end = entries.length < auditPage;
+    show("#audit-end", end);
+    $("#audit-older").hidden = end;
+  }
+
+  $("#audit-older").addEventListener("click", async () => {
+    try { await loadAudit(true); } catch (e) { alert(e.message); }
+  });
+
   function listItems(ul, items, prefix) {
     ul.replaceChildren();
     for (const text of items || []) {
@@ -175,7 +207,7 @@
   });
 
   async function refresh() {
-    await Promise.all([loadPeers(), loadTokens(), loadUsers(), loadPolicy()]);
+    await Promise.all([loadPeers(), loadTokens(), loadUsers(), loadPolicy(), loadAudit(false)]);
   }
 
   async function enter(session) {

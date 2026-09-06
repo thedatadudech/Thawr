@@ -51,15 +51,15 @@ func TestUserCreateValidation(t *testing.T) {
 		{"alice", "admin", "short"},
 	}
 	for _, c := range cases {
-		if _, err := users.Create(ctx, c.name, c.role, c.pw); !errors.Is(err, ErrValidation) {
+		if _, err := users.Create(ctx, LocalAdmin, c.name, c.role, c.pw); !errors.Is(err, ErrValidation) {
 			t.Errorf("%+v: got %v, want ErrValidation", c, err)
 		}
 	}
-	u, err := users.Create(ctx, "alice", "admin", "long enough")
+	u, err := users.Create(ctx, LocalAdmin, "alice", "admin", "long enough")
 	if err != nil || u.ID == "" || u.PasswordHash == "" {
 		t.Fatalf("valid create: %+v %v", u, err)
 	}
-	if _, err := users.Create(ctx, "alice", "member", "long enough"); err == nil {
+	if _, err := users.Create(ctx, LocalAdmin, "alice", "member", "long enough"); err == nil {
 		t.Error("duplicate name accepted")
 	}
 }

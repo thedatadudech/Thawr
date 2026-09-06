@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/thedatadudech/thawr/internal/store"
+	"github.com/thedatadudech/thawr/internal/wg"
 )
 
 // Registry lists and manages registered peers.
@@ -20,6 +22,7 @@ type Registry struct {
 	// overlay and tagAllowed serve CreateStatic.
 	overlay    netip.Prefix
 	tagAllowed TagAllowed
+	audit      *Auditor
 }
 
 // NewRegistry builds the registry service. notify may be nil.
@@ -36,6 +39,12 @@ func (r *Registry) WithNotifier(n Notifier) *Registry {
 // WithClock sets the time source.
 func (r *Registry) WithClock(now func() time.Time) *Registry {
 	r.now = now
+	return r
+}
+
+// WithAuditor records every mutation in the audit log.
+func (r *Registry) WithAuditor(a *Auditor) *Registry {
+	r.audit = a
 	return r
 }
 
@@ -92,6 +101,9 @@ func (r *Registry) Rename(ctx context.Context, by Principal, name, newName strin
 			}
 			return err
 		}
+		if err := r.audit.Record(ctx, tx, by, AuditPeerRename, p.ID, map[string]string{"from": name, "to": newName}); err != nil {
+			return err
+		}
 		_, err := tx.Meta().IncrementGeneration(ctx)
 		return err
 	})
@@ -113,16 +125,32 @@ func (r *Registry) Delete(ctx context.Context, by Principal, name string) error 
 	if err != nil {
 		return err
 	}
-	if err := r.deletePeer(ctx, p.ID); err != nil {
+	if err := r.deletePeer(ctx, p.ID, by, AuditPeerDelete, p.Name); err != nil {
 		return err
 	}
 	r.log.Info("peer deleted", "peer", name, "peer_id", p.ID, "by", by.Name)
 	return nil
 }
 
-func (r *Registry) deletePeer(ctx context.Context, id string) error {
+// deletePeer removes the peer, records action for the principal and
+// bumps the generation in one transaction. The name is looked up when
+// the caller does not know it (a peer leaving by id).
+func (r *Registry) deletePeer(ctx context.Context, id string, by Principal, action, name string) error {
 	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		if name == "" {
+			p, err := tx.Peers().GetByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			name = p.Name
+		}
 		if err := tx.Peers().Delete(ctx, id); err != nil {
+			return err
+		}
+		if by.Name == "" {
+			by = PeerPrincipal(name)
+		}
+		if err := r.audit.Record(ctx, tx, by, action, id, map[string]string{"name": name}); err != nil {
 			return err
 		}
 		_, err := tx.Meta().IncrementGeneration(ctx)
@@ -155,18 +183,26 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string) (
 	}
 	var gen int64
 	err := r.store.InTx(ctx, func(tx *store.Store) error {
+		p, err := tx.Peers().GetByID(ctx, peerID)
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
 		if err := tx.Peers().SetPublicKey(ctx, peerID, newPublicKey); err != nil {
 			if errors.Is(err, store.ErrConflict) {
 				return fmt.Errorf("%w: key already in use", ErrValidation)
 			}
-			if errors.Is(err, store.ErrNotFound) {
-				return fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
-			}
 			return err
 		}
-		var err error
 		gen, err = tx.Meta().IncrementGeneration(ctx)
-		return err
+		if err != nil {
+			return err
+		}
+		key, _ := parsePublicKey(newPublicKey)
+		return r.audit.Record(ctx, tx, PeerPrincipal(p.Name), AuditPeerRotateKey, peerID,
+			map[string]string{"name": p.Name, "key": wg.Fingerprint(key), "generation": strconv.FormatInt(gen, 10)})
 	})
 	if err != nil {
 		return 0, err
@@ -178,7 +214,7 @@ func (r *Registry) RotateKey(ctx context.Context, peerID, newPublicKey string) (
 
 // Leave removes a peer at its own request.
 func (r *Registry) Leave(ctx context.Context, peerID string) error {
-	if err := r.deletePeer(ctx, peerID); err != nil {
+	if err := r.deletePeer(ctx, peerID, Principal{}, AuditPeerLeave, ""); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("peer %s: %w", peerID, ErrNotFound)
 		}

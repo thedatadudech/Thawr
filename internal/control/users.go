@@ -40,6 +40,13 @@ type Users struct {
 	limit *limiter
 	// dummyHash keeps the cost of a failed lookup equal to a real check.
 	dummyHash string
+	audit     *Auditor
+}
+
+// WithAuditor records user creation and logins in the audit log.
+func (u *Users) WithAuditor(a *Auditor) *Users {
+	u.audit = a
+	return u
 }
 
 // NewUsers builds the user service.
@@ -57,9 +64,9 @@ func NewUsers(st *store.Store, now func() time.Time, log *slog.Logger) (*Users, 
 	}, nil
 }
 
-// Create adds a user. The password is hashed with argon2id and never
-// stored or logged in clear.
-func (u *Users) Create(ctx context.Context, name, role, password string) (store.User, error) {
+// Create adds a user on behalf of by, which the audit row names. The
+// password is hashed with argon2id and never stored or logged in clear.
+func (u *Users) Create(ctx context.Context, by Principal, name, role, password string) (store.User, error) {
 	if !validLabel(name) {
 		return store.User{}, fmt.Errorf("%w: name %q must be 1-63 lowercase letters, digits or hyphens", ErrValidation, name)
 	}
@@ -78,7 +85,13 @@ func (u *Users) Create(ctx context.Context, name, role, password string) (store.
 		return store.User{}, err
 	}
 	user := store.User{ID: id, Name: name, Role: role, PasswordHash: hash, CreatedAt: u.now()}
-	if err := u.store.Users().Create(ctx, user); err != nil {
+	err = u.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.Users().Create(ctx, user); err != nil {
+			return err
+		}
+		return u.audit.Record(ctx, tx, by, AuditUserCreate, user.ID, map[string]string{"name": name, "role": role})
+	})
+	if err != nil {
 		return store.User{}, err
 	}
 	u.log.Info("user created", "user", name, "role", role)
@@ -107,10 +120,16 @@ func (u *Users) Authenticate(ctx context.Context, name, password string) (store.
 	if !ok || !found {
 		u.limit.fail(name)
 		u.log.Warn("login failed", "user", name)
+		if err := u.audit.Record(ctx, u.store, anonymousPrincipal(name), AuditLoginFailed, name, nil); err != nil {
+			u.log.Error("audit login failure", "err", err)
+		}
 		return store.User{}, ErrForbidden
 	}
 	u.limit.reset(name)
 	u.log.Info("login ok", "user", name)
+	if err := u.audit.Record(ctx, u.store, Principal{UserID: user.ID, Name: user.Name, Role: user.Role}, AuditLoginOK, name, nil); err != nil {
+		return store.User{}, err
+	}
 	return user, nil
 }
 

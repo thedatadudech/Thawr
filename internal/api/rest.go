@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 // RESTDeps are the collaborators of the REST handler. Users, Tokens and
@@ -32,7 +33,11 @@ type RESTDeps struct {
 	Relay    RelaySession
 	// Policy enables the policy endpoints.
 	Policy PolicyService
-	Join   JoinInfo
+	// Audit enables GET /api/v1/audit (admins only).
+	Audit AuditService
+	// Now is the clock for relative audit queries; defaults to time.Now.
+	Now  func() time.Time
+	Join JoinInfo
 	// Hub is the server's WireGuard interface as phones connect to it.
 	Hub HubInfo
 	// Sessions backs cookie logins on the HTTPS listener.
@@ -57,6 +62,9 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 	}
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
+	}
+	if deps.Now == nil {
+		deps.Now = time.Now
 	}
 	h := &rest{deps: deps}
 	mux := http.NewServeMux()
@@ -92,6 +100,9 @@ func NewREST(deps RESTDeps) (http.Handler, error) {
 			mux.HandleFunc("GET /api/v1/policy", h.requireAuth(h.handleShowPolicy))
 			mux.HandleFunc("POST /api/v1/policy/check", h.requireAdmin(h.handleCheckPolicy))
 			mux.HandleFunc("POST /api/v1/policy/reload", h.requireAdmin(h.handleReloadPolicy))
+		}
+		if deps.Audit != nil {
+			mux.HandleFunc("GET /api/v1/audit", h.requireAdmin(h.handleListAudit))
 		}
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {

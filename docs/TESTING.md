@@ -6,7 +6,7 @@
 |---|---|---|
 | `make test` | Unit tests with the race detector, fake WireGuard device, in-process gRPC/TLS | Every OS, CI matrix |
 | `make lint` | gofmt, go vet, golangci-lint | Linux, CI |
-| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched) | Linux, root, iproute2, nftables |
+| `make integration` | Network-namespace tests in `tests/`: server boot, two-client enrollment, encrypted ping, NAT traversal (restricted/restricted, full-cone/symmetric, symmetric/symmetric, same LAN; needs `nft`), relay over symmetric NATs, relay-to-direct upgrade (needs `conntrack`), relay throughput (needs `iperf3`), policy enforcement end to end (needs `nc`), a phone joining via `wg-quick` through the hub and the policy it is subject to (needs `wg-quick`, `nc`), the nftables ruleset listing (`internal/wg`, needs `nft`), server and client installed as systemd services with the real binary (skips unless systemd is PID 1 and no thawr service exists), `<name>.thawr` resolution through each client's resolver and through the hub from the phone (needs `wg-quick`; clients run with `--dns serve` so the host's resolver files are never touched), a rotated key held on the other client until `client trust` and the rotation in `admin audit` | Linux, root, iproute2, nftables |
 | `make release-verify` | Builds two targets twice and compares the archives; CI runs it on every push and before every release | Linux |
 
 The integration tests use the real binary and the WireGuard adapter that
@@ -210,3 +210,27 @@ Two devices behind different home routers, server on a public host.
 7. `dig @<self ip> -x 100.64.0.1` answers `hub.thawr.`;
    `dig @<self ip> example.com` is REFUSED; the same against the hub
    address forwards.
+
+## Manual checklist for key pinning and the audit log (spec 011)
+
+1. Two devices see each other. `thawr client rotate-key` on the laptop
+   prints the `thawr client trust <laptop>` reminder; within seconds the
+   desktop's `client status` header says `1 key changed: thawr client
+   trust <laptop>`, the laptop's row reads `key changed`, `ssh
+   <laptop>.thawr` fails to resolve and `client ping <laptop>` reports
+   an unknown peer.
+2. `thawr client trust <laptop>` on the desktop prints `trusted <laptop>
+   (<old fp> → <new fp>)`; the row returns to `direct` and the name
+   resolves again. `pins.json` in the state dir is mode 0600 and carries
+   the new key.
+3. Restart the desktop client before trusting: the laptop is still held
+   (the pins, not the cached netmap, decide).
+4. Admin UI as admin: the "Audit log" section lists the rotation
+   (`peer:<laptop>`, `peer.rotate_key`, fingerprint), the login, and
+   every token or peer action; "Load older" pages back; as a member the
+   section is absent and `GET /api/v1/audit` answers 403.
+5. `thawr admin audit --since 1h` and `--action peer.rotate_key --json`
+   show the same rows; none contains a token secret or a full key.
+6. With `audit: {retention_days: 1}` and an entry older than a day
+   (`sqlite3` on a copy, or wait), the next start logs `audit: pruned
+   old entries`.
