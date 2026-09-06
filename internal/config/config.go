@@ -28,7 +28,17 @@ type Config struct {
 	MinClientVersion string `yaml:"min_client_version"`
 	Relay            Relay  `yaml:"relay"`
 	DNS              DNS    `yaml:"dns"`
+	Audit            Audit  `yaml:"audit"`
 }
+
+// Audit tunes the audit log of control-plane mutations (spec 011).
+type Audit struct {
+	// RetentionDays is how long entries are kept; 0 keeps them forever.
+	RetentionDays int `yaml:"retention_days"`
+}
+
+// DefaultAuditRetentionDays is the default audit retention.
+const DefaultAuditRetentionDays = 90
 
 // DNS configures the hub resolver: <name>.thawr for phones and any
 // peer that asks the hub address (spec 010).
@@ -114,6 +124,7 @@ func Default() *Config {
 		},
 		TLS:         TLS{Mode: TLSModeSelfSigned},
 		DNS:         DNS{Enabled: true},
+		Audit:       Audit{RetentionDays: DefaultAuditRetentionDays},
 		PolicyFile:  "/etc/thawr/policy.yaml",
 		AdminSocket: filepath.Join(DefaultDataDir, "admin.sock"),
 		Log:         Log{Level: "info", Format: "text"},

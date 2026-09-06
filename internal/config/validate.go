@@ -72,6 +72,9 @@ func (c *Config) Validate() error {
 	if c.Relay.MaxBytesPerSecond < 0 {
 		add("relay.max_bytes_per_second: must not be negative")
 	}
+	if c.Audit.RetentionDays < 0 {
+		add("audit.retention_days: must not be negative (0 keeps entries forever)")
+	}
 	if c.Overlay.Interface == "" || len(c.Overlay.Interface) > 15 || strings.ContainsAny(c.Overlay.Interface, " /") {
 		add("overlay.interface: %q must be 1-15 characters without spaces or slashes", c.Overlay.Interface)
 	}

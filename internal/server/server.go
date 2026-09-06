@@ -50,6 +50,8 @@ type Deps struct {
 	UI fs.FS
 	// HubOptions tune presence timing (tests).
 	HubOptions control.HubOptions
+	// AuditPruneInterval overrides the daily audit prune (tests).
+	AuditPruneInterval time.Duration
 	// ObserveInterval is how often the hub interface's peer endpoints
 	// are read into the endpoint table (15 s).
 	ObserveInterval time.Duration
@@ -241,7 +243,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	restDeps := api.RESTDeps{
 		Status: s, UI: s.deps.UI, Logger: s.log,
 		Users: s.users, Auth: s.users, Tokens: s.tokens, Peers: s.registry, Presence: s, Paths: s.paths, Endpoints: s.endpoints,
-		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc,
+		Join: s.JoinInfo(), Sessions: s.sessions, NodeAuth: s.registry, Relay: s.relay, Policy: s.policySvc, Audit: s.st.Audit(), Now: s.deps.Now,
 		Hub: hubInfo,
 	}
 	webHandler, err := api.NewREST(restDeps)
@@ -278,6 +280,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan struct{}) (err error) {
 	go s.hub.RunSweeper(hubCtx, 5*time.Second)
 	go s.followRegistry(hubCtx)
 	go s.observeHub(hubCtx)
+	go s.pruneAudit(hubCtx)
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -616,10 +619,13 @@ func (s *Server) buildServices(ctx context.Context) error {
 		return err
 	}
 	visibility := control.PolicyVisibility{Load: s.policySvc.Load}
-	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed)
-	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub)
+	auditor := control.NewAuditor(s.deps.Now)
+	users.WithAuditor(auditor)
+	s.policySvc.WithAuditor(auditor)
+	s.tokens = control.NewTokens(s.st, s.deps.Now, s.log).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor)
+	s.enroller = control.NewEnroller(s.st, s.deps.Now, s.log, s.cfg.OverlayPrefix(), s.cfg.MinClientVersion).WithNotifier(hub).WithAuditor(auditor)
 	s.registry = control.NewRegistry(s.st, s.log).WithNotifier(hub).WithClock(s.deps.Now).
-		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed)
+		WithOverlay(s.cfg.OverlayPrefix()).WithTagAllowed(s.policySvc.TagAllowed).WithAuditor(auditor)
 	s.staticSeen = map[string]time.Time{}
 	s.sessions = api.NewSessions(s.deps.Now)
 	s.relay = relay.NewServer(keyVisibility{control.NewKeyVisibility(s.st, visibility, hub.Generation)},
