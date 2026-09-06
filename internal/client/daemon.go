@@ -138,7 +138,11 @@ type Daemon struct {
 	selfIP  netip.Addr
 
 	// devMu serialises multi-step device changes (probe re-adds).
-	devMu      sync.Mutex
+	devMu sync.Mutex
+	// applyMu serialises apply end to end, so a re-apply of the last
+	// received netmap (trust, key rotation) reads it under the same
+	// lock and can never overwrite a newer one with a stale snapshot.
+	applyMu    sync.Mutex
 	filterWarn sync.Once
 
 	// pmu guards the path prober's state.
@@ -427,6 +431,29 @@ func (d *Daemon) syncOnce(ctx context.Context) error {
 // passed and caches the netmap as received (held entries are derived
 // again from the pins on the next start).
 func (d *Daemon) apply(ctx context.Context, nm NetMap, cache bool) error {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	return d.applyLocked(ctx, nm, cache)
+}
+
+// reapply applies the last received netmap again, after a trust or a
+// key rotation changed how it must be applied. The netmap is read
+// under applyMu, so it is the newest one and no other apply can
+// interleave.
+func (d *Daemon) reapply(ctx context.Context) error {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	d.mu.Lock()
+	offered := d.offered
+	d.mu.Unlock()
+	if offered == nil {
+		return nil
+	}
+	return d.applyLocked(ctx, *offered, false)
+}
+
+// applyLocked is apply with applyMu held.
+func (d *Daemon) applyLocked(ctx context.Context, nm NetMap, cache bool) error {
 	now := d.opts.Now()
 	d.mu.Lock()
 	key, dev, prev := d.key, d.dev, d.held
@@ -494,10 +521,10 @@ func (d *Daemon) logHeld(prev, now []HeldStatus) {
 // every one, HubName for the hub) and re-applies the last netmap.
 // ErrNotHeld names an entry that is not held.
 func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error) {
-	// Selection, pinning and the snapshot of the netmap to re-apply
-	// happen under one lock hold, so a netmap arriving in between
-	// cannot make Trust pin a key the server no longer offers or
-	// reconfigure the device from a stale generation.
+	// Selection and pinning happen under one lock hold, so a netmap
+	// arriving in between cannot make Trust pin a key the server no
+	// longer offers; reapply then reads the newest netmap under the
+	// apply lock, so the device is never configured from a stale one.
 	d.mu.Lock()
 	accept, err := selectHeld(d.held, names)
 	if err != nil {
@@ -510,15 +537,12 @@ func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error
 		}
 		d.log.Info("key trusted", "peer", h.Name, "was", fingerprintOf(h.PinnedKey), "now", fingerprintOf(h.OfferedKey))
 	}
-	offered := d.offered
 	d.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	if offered != nil {
-		if err := d.apply(ctx, *offered, false); err != nil {
-			return nil, err
-		}
+	if err := d.reapply(ctx); err != nil {
+		return nil, err
 	}
 	return accept, nil
 }
@@ -607,12 +631,9 @@ func (d *Daemon) RotateKey(ctx context.Context) error {
 	}
 	d.mu.Lock()
 	d.key = newKey
-	nm := d.offered
 	d.mu.Unlock()
-	if nm != nil {
-		if err := d.apply(ctx, *nm, false); err != nil {
-			return err
-		}
+	if err := d.reapply(ctx); err != nil {
+		return err
 	}
 	d.log.Info("key rotated; other devices hold this peer until they trust the new key", "key", wg.Fingerprint(newKey.PublicKey()), "hint", "thawr client trust "+d.state.Name)
 	return nil

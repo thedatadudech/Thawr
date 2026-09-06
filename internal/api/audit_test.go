@@ -82,8 +82,10 @@ func TestAuditEndpoint(t *testing.T) {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
 	}
-	// A user created over HTTPS is attributed to the session's user, not
-	// to the admin socket.
+	// A user created through the session listener is attributed to the
+	// session's user, not to the admin socket. The principal comes from
+	// the session cookie; no handler consults the request's TLS state,
+	// which the real listener terminates before the handler.
 	if rec := env.do(env.handler, admin, http.MethodPost, "/api/v1/users", map[string]string{"name": "bob", "role": "member", "password": "bobpassword1"}, true); rec.Code != http.StatusCreated {
 		t.Fatalf("create user: %d %s", rec.Code, rec.Body.String())
 	}
