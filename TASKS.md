@@ -470,6 +470,10 @@ entry.
       - Retention is a daily pruner on the server with an injectable
         interval; the REST `since` filter accepts a duration or an
         RFC 3339 time and uses the server's clock.
+      - Windows CI: `TestRelayNeverLogsPayload` read the log buffer as
+        soon as the session count dropped, before the close line was
+        written; it now waits for the line. A pre-existing race in the
+        relay test, not touched by the spec.
       - Verified here: pins rules, daemon hold/trust for a peer and the
         hub against the fake device, CLI trust and status rendering,
         store list/filter/cursor/prune, every audit action with actor
