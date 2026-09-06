@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -190,16 +191,67 @@ server is unreachable, 2 usage error, 3 client not running.`,
 	rotate := &cobra.Command{
 		Use:   "rotate-key",
 		Short: "Generate a new WireGuard key and register it with the server",
-		Args:  cobra.NoArgs,
+		Long: `Generates a new WireGuard key, registers it with the server and
+reconfigures the interface. Every other device pins this device's key
+and shows it as "key changed" until someone runs "thawr client trust
+<this name>" there.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := client.NewLocalClient(socket).RotateKey(cmd.Context()); err != nil {
+			lc := client.NewLocalClient(socket)
+			if err := lc.RotateKey(cmd.Context()); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), "key rotated")
+			name := "<this peer>"
+			if st, err := lc.Status(cmd.Context()); err == nil && st.Self.Name != "" {
+				name = st.Self.Name
+			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "key rotated; other devices show this peer as \"key changed\" until they run: thawr client trust %s\n", name)
 			return err
 		},
 	}
 	addClientCommonFlags(rotate, &stateDir, &socket)
+
+	var trustAll bool
+	trust := &cobra.Command{
+		Use:   "trust <name>...",
+		Short: "Accept the changed key of held peers (\"hub\" for the server's hub)",
+		Long: `A peer whose WireGuard key differs from the one this device pinned is
+held out of the tunnel and shown as "key changed" in status. trust
+accepts the offered key, pins it and lets the peer back in. Use it after
+a peer ran rotate-key, or after checking with the peer's owner why the
+key changed. Exit codes: 0 accepted, 2 nothing held under that name, 3
+client not running.`,
+		Args: usageArgs(cobra.ArbitraryArgs),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if trustAll == (len(args) > 0) {
+				return &exitError{code: exitConfigError, err: errors.New("name one or more held peers, or --all")}
+			}
+			if trustAll {
+				args = []string{"all"}
+			}
+			lc := client.NewLocalClient(socket)
+			for _, name := range args {
+				res, err := lc.Trust(cmd.Context(), name)
+				var le *client.LocalError
+				switch {
+				case errors.As(err, &le) && le.Status == http.StatusNotFound:
+					return &exitError{code: exitConfigError, err: fmt.Errorf("%s: %s", name, le.Message)}
+				case errors.As(err, &le):
+					return fmt.Errorf("trust %s: %s", name, le.Message)
+				case err != nil:
+					return &exitError{code: exitNotRunning, err: fmt.Errorf("thawr client is not running (%w)", err)}
+				}
+				for _, h := range res.Trusted {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "trusted %s (%s → %s)\n", h.Name, fingerprint(h.PinnedKey), fingerprint(h.OfferedKey)); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		},
+	}
+	trust.Flags().BoolVar(&trustAll, "all", false, "accept every held key")
+	addClientCommonFlags(trust, &stateDir, &socket)
 
 	var pingCount int
 	var pingJSON bool
@@ -220,7 +272,7 @@ reply, 2 unknown peer, 3 client not running. --count 0 skips the echoes.`,
 	ping.Flags().BoolVar(&pingJSON, "json", false, "print the settled path as JSON")
 	addClientCommonFlags(ping, &stateDir, &socket)
 
-	cmd.AddCommand(up, down, status, rotate, ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
+	cmd.AddCommand(up, down, status, rotate, trust, ping, newClientInstallCmd(deps), newClientUninstallCmd(deps))
 	return cmd
 }
 

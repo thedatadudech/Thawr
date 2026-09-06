@@ -315,3 +315,27 @@ func TestStatusExitCodes(t *testing.T) {
 		})
 	}
 }
+
+// TestStatusRenderHeld: a held peer shows "key changed" and the header
+// names the command that clears it.
+func TestStatusRenderHeld(t *testing.T) {
+	st := statusFixture()
+	st.Held = []client.HeldStatus{
+		{Name: "build-box", IPv4: "100.64.0.9", Kind: "agent", PinnedKey: "BLD=", OfferedKey: "NEW=", Since: st.RetrievedAt},
+		{Name: "hub", IPv4: "100.64.0.1", Kind: "server", PinnedKey: "HUB=", OfferedKey: "HUB2=", Since: st.RetrievedAt},
+	}
+	st.Peers[1].Path, st.Peers[1].PathEndpoint, st.Peers[1].LastHandshakeAt = client.PathKeyChanged, "", nil
+	st.Hub.Path, st.Hub.PathEndpoint, st.Hub.LastHandshakeAt = client.PathKeyChanged, "", nil
+	var out bytes.Buffer
+	if err := renderStatus(&out, st); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{" · 2 keys changed: thawr client trust build-box hub\n", "build-box     100.64.0.9    agent    -       key changed", "hub           100.64.0.1    server   -       key changed"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if heldLine(st.Held[:1]) != " · 1 key changed: thawr client trust build-box" {
+		t.Errorf("single: %q", heldLine(st.Held[:1]))
+	}
+}
