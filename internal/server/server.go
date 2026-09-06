@@ -342,7 +342,7 @@ func (s *Server) startHub(ctx context.Context) error {
 // reloadPolicy re-reads the policy file on SIGHUP; an invalid file
 // leaves the running policy untouched.
 func (s *Server) reloadPolicy() {
-	if _, err := s.policySvc.Reload(context.Background()); err != nil {
+	if _, err := s.policySvc.Reload(context.Background(), control.LocalAdmin); err != nil {
 		s.log.Error("policy reload failed, keeping current policy", "path", s.cfg.PolicyFile, "err", err)
 	}
 }

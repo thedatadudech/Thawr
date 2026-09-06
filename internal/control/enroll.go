@@ -49,6 +49,13 @@ type Enroller struct {
 	minVersion string
 	limit      *rateLimit
 	notify     Notifier
+	audit      *Auditor
+}
+
+// WithAuditor records each enrollment in the audit log.
+func (e *Enroller) WithAuditor(a *Auditor) *Enroller {
+	e.audit = a
+	return e
 }
 
 // WithNotifier sets the notifier told after each enrollment.
@@ -177,6 +184,10 @@ func (e *Enroller) Enroll(ctx context.Context, req EnrollRequest) (EnrollResult,
 		}
 		gen, err := tx.Meta().IncrementGeneration(ctx)
 		if err != nil {
+			return err
+		}
+		if err := e.audit.Record(ctx, tx, PeerPrincipal(peer.Name), AuditPeerEnrol, peer.ID,
+			map[string]string{"name": peer.Name, "kind": peer.Kind, "tags": tagsDetail(peer.Tags), "ipv4": peer.IPv4, "key": wg.Fingerprint(pub), "token": tok.ID, "os": peer.OS, "client_version": req.ClientVersion}); err != nil {
 			return err
 		}
 		result = EnrollResult{Peer: peer, NodeSecret: nodeSecret, Generation: gen}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -33,6 +34,7 @@ type PolicyService struct {
 	log      *slog.Logger
 	path     string
 	notifier Notifier
+	audit    *Auditor
 
 	mu       sync.Mutex
 	current  *policy.Policy
@@ -45,6 +47,12 @@ type PolicyService struct {
 // NewPolicyService builds the service around the policy file at path.
 func NewPolicyService(st *store.Store, log *slog.Logger, path string, notifier Notifier) *PolicyService {
 	return &PolicyService{store: st, log: log, path: path, notifier: notifier, current: policy.Empty(), cacheGen: -1}
+}
+
+// WithAuditor records reloads in the audit log.
+func (s *PolicyService) WithAuditor(a *Auditor) *PolicyService {
+	s.audit = a
+	return s
 }
 
 // LoadInitial reads the file at startup: a missing file means the
@@ -76,7 +84,7 @@ func (s *PolicyService) LoadInitial(ctx context.Context) error {
 // untouched and returns ErrPolicyInvalid with the report's Errors
 // filled; a valid one replaces it, bumps the netmap generation and
 // notifies the hub so every client gets a new map.
-func (s *PolicyService) Reload(ctx context.Context) (PolicyReport, error) {
+func (s *PolicyService) Reload(ctx context.Context, by Principal) (PolicyReport, error) {
 	p, err := policy.Load(s.path)
 	if err != nil {
 		return PolicyReport{Errors: errorLines(err)}, fmt.Errorf("%w: %w", ErrPolicyInvalid, err)
@@ -89,8 +97,10 @@ func (s *PolicyService) Reload(ctx context.Context) (PolicyReport, error) {
 	s.current, s.warnings, s.compiled = p, warnings, nil
 	s.mu.Unlock()
 	if err := s.store.InTx(ctx, func(tx *store.Store) error {
-		_, err := tx.Meta().IncrementGeneration(ctx)
-		return err
+		if _, err := tx.Meta().IncrementGeneration(ctx); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, tx, by, AuditPolicyReload, s.path, map[string]string{"hash": p.Hash, "rules": strconv.Itoa(len(p.ACLs))})
 	}); err != nil {
 		return PolicyReport{}, fmt.Errorf("control: bump generation after policy reload: %w", err)
 	}

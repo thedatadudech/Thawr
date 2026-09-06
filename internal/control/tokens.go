@@ -41,6 +41,7 @@ type TagAllowed func(user, tag string) bool
 
 // Tokens issues and lists one-time enrollment tokens.
 type Tokens struct {
+	audit      *Auditor
 	store      *store.Store
 	now        func() time.Time
 	log        *slog.Logger
@@ -51,6 +52,12 @@ type Tokens struct {
 // admins may create tagged tokens.
 func NewTokens(st *store.Store, now func() time.Time, log *slog.Logger) *Tokens {
 	return &Tokens{store: st, now: now, log: log}
+}
+
+// WithAuditor records token creation and revocation in the audit log.
+func (t *Tokens) WithAuditor(a *Auditor) *Tokens {
+	t.audit = a
+	return t
 }
 
 // WithTagAllowed installs the tagOwners check for members.
@@ -122,7 +129,14 @@ func (t *Tokens) Create(ctx context.Context, by Principal, req TokenRequest) (Cr
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(ttl),
 	}
-	if err := t.store.Tokens().Create(ctx, tok); err != nil {
+	err = t.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.Tokens().Create(ctx, tok); err != nil {
+			return err
+		}
+		return t.audit.Record(ctx, tx, by, AuditTokenCreate, tok.ID,
+			map[string]string{"owner": owner.Name, "kind": tok.Kind, "tags": tagsDetail(tags), "peer_name": req.PeerName, "expires_at": tok.ExpiresAt.UTC().Format(time.RFC3339)})
+	})
+	if err != nil {
 		return CreatedToken{}, err
 	}
 	t.log.Info("token created", "token", tok.ID, "owner", owner.Name, "kind", tok.Kind, "expires_at", tok.ExpiresAt, "by", by.Name)
@@ -165,10 +179,16 @@ func (t *Tokens) Revoke(ctx context.Context, by Principal, id string) error {
 			return fmt.Errorf("token %s: %w", id, ErrNotFound)
 		}
 	}
-	if err := t.store.Tokens().Delete(ctx, id); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("token %s: %w", id, ErrNotFound)
+	err := t.store.InTx(ctx, func(tx *store.Store) error {
+		if err := tx.Tokens().Delete(ctx, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("token %s: %w", id, ErrNotFound)
+			}
+			return err
 		}
+		return t.audit.Record(ctx, tx, by, AuditTokenRevoke, id, nil)
+	})
+	if err != nil {
 		return err
 	}
 	t.log.Info("token revoked", "token", id, "by", by.Name)

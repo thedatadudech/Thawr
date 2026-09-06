@@ -12,7 +12,7 @@ import (
 type PolicyService interface {
 	Show(ctx context.Context) control.PolicyReport
 	Check(ctx context.Context, data []byte) control.PolicyReport
-	Reload(ctx context.Context) (control.PolicyReport, error)
+	Reload(ctx context.Context, by control.Principal) (control.PolicyReport, error)
 	// FilterFor lists the compiled receiver-side rules of one peer.
 	FilterFor(ctx context.Context, peerID string) []control.FilterRule
 }
@@ -46,7 +46,8 @@ func (h *rest) handleCheckPolicy(w http.ResponseWriter, r *http.Request) {
 // handleReloadPolicy re-reads the policy file: 200 with the report, or
 // 400 with the validation errors while the old policy stays active.
 func (h *rest) handleReloadPolicy(w http.ResponseWriter, r *http.Request) {
-	rep, err := h.deps.Policy.Reload(r.Context())
+	by, _ := principalFrom(r.Context())
+	rep, err := h.deps.Policy.Reload(r.Context(), by)
 	if errors.Is(err, control.ErrPolicyInvalid) {
 		writeJSON(w, http.StatusBadRequest, struct {
 			Error string `json:"error"`

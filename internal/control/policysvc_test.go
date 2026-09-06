@@ -36,7 +36,7 @@ func TestPolicyServiceReload(t *testing.T) {
 
 	// Invalid file: rejected with the rule index, old policy kept.
 	write(t, path, "version: 1\nacls:\n  - action: accept\n    src: [nobody]\n    dst: ['*:*']\n")
-	rep, err := svc.Reload(ctx)
+	rep, err := svc.Reload(ctx, LocalAdmin)
 	if !errors.Is(err, ErrPolicyInvalid) || len(rep.Errors) != 1 || rep.Errors[0] != `acls[0].src[0]: unknown user "nobody"` {
 		t.Fatalf("invalid reload: %v %+v", err, rep)
 	}
@@ -46,7 +46,7 @@ func TestPolicyServiceReload(t *testing.T) {
 
 	// Valid file: installed, generation bumped, hub notified, compiled.
 	write(t, path, "version: 1\nacls:\n  - action: accept\n    src: [alice]\n    dst: ['bob:22']\n  - action: accept\n    src: ['*']\n    dst: ['tag:prod:*']\n")
-	rep, err = svc.Reload(ctx)
+	rep, err = svc.Reload(ctx, LocalAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
