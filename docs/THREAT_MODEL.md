@@ -100,7 +100,7 @@ Attacker has root on the server host or a copy of `data_dir`.
 |---|---|
 | Decrypt peer-to-peer traffic | Not possible: the server never holds peer private keys or session keys for agent peers. Relay carries ciphertext. This is the main reason for the DERP-style relay over a hub-and-spoke design |
 | Decrypt static-peer traffic | Possible: the hub terminates WireGuard for phones. Residual risk, documented in the QR export UI. Users needing end-to-end for phones must wait for a native client (non-goal v1) |
-| Distribute malicious keys (insert an attacker peer as a "visible" peer, or swap a key) | Possible: the server is the trust root for key distribution. Residual risk accepted for v1; mitigations for phase 2: signed netmaps with an offline key, client-side pinning of first-seen peer keys with a warning on change, audit log |
+| Distribute malicious keys (insert an attacker peer as a "visible" peer, or swap a key) | Reduced (spec 011): every client pins the hub key and each peer's `(id, key)` under its name on first sight and holds a changed key out of the tunnel, DNS and the filter until the user runs `thawr client trust <name>`; the peer shows as `key changed` in status. A swap therefore stops traffic instead of redirecting it, and a rotation is a visible, deliberate act on every other device. Residual: first contact is trusted (the enrolment already trusts the server it talks to), a new peer under a new name is accepted, and an admin who runs `trust` without asking why the key changed accepts the swap. Signed peer records with an offline admin key remove the first-contact and new-name gaps (spec 012) |
 | Steal node secrets | Only SHA-256 hashes are stored; the attacker cannot impersonate existing clients from the DB alone, but as the server they can serve them anything |
 | Steal password hashes | argon2id (64 MiB, 3 iterations, 4 lanes) slows offline cracking; admins are told to use a password manager |
 | Steal enrollment tokens | Hashed; unused tokens can be revoked by deleting `data_dir` and re-issuing |
@@ -110,7 +110,14 @@ Attacker has root on the server host or a copy of `data_dir`.
 
 Out of scope for enforcement; the design limits blast radius: admins see
 public keys, not private keys; token secrets are shown once; every admin
-action is logged with user and peer id at `info`.
+action is logged with user and peer id at `info` and recorded in the
+`audit_log` table (spec 011: tokens, enrolments, static peers, renames,
+deletions, key rotations, user creation, logins, policy reloads, with
+the acting user, socket or peer, and key fingerprints instead of keys),
+kept for `audit.retention_days` and listed with `thawr admin audit`,
+`GET /api/v1/audit` and the UI. The log lives in the same database as
+everything else: an admin with shell access to the server can edit it,
+so it reconstructs what happened through the API, not what root did.
 
 ### T6 Supply chain
 
@@ -144,12 +151,21 @@ These are checked by tests where possible.
    requests without a session (`TestRESTAuth`).
 9. Client refuses to connect to a server whose TLS fingerprint differs
    from the pinned one (`TestFingerprintPin`).
+10. A netmap whose hub key or a known peer's key differs from the pinned
+    one is applied without that peer, and the peer returns only after
+    `trust` (`TestDaemonHoldsChangedKey`, `TestDaemonHoldsChangedHubKey`,
+    `TestPinsRenameAndSubstitution`).
+11. Every control-plane mutation leaves exactly one audit row inside its
+    own transaction, without secrets or full keys, and a mutation whose
+    row cannot be written does not happen (`TestAuditEveryMutation`,
+    `TestAuditFailureRollsBack`).
 
 ## Explicitly out of scope for v1
 
 - Traffic analysis resistance, metadata hiding, cover traffic.
-- Protection against a compromised server distributing malicious keys
-  (phase 2: signed netmaps).
+- Full protection against a compromised server distributing malicious
+  keys: pinning (spec 011) holds swapped keys but trusts first contact;
+  signed peer records are spec 012.
 - Hardware-backed keys, TPM attestation, device posture.
 - End-to-end encryption for static (mobile) peers.
 - Multi-tenant isolation on one server.

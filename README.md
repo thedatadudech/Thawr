@@ -45,6 +45,10 @@ lives in `docs/`; the implementation follows one spec at a time from
   (nftables with kernel WireGuard, a userspace filter otherwise).
   `thawr admin policy check`, `reload` and `show` manage it live.
 - Phones use the official WireGuard app via a QR code.
+- Every device pins the keys it has seen: a peer whose key changes is
+  held out of the tunnel until you run `thawr client trust <name>`, so
+  a compromised server cannot silently swap a key. The server keeps an
+  audit log of every change (`thawr admin audit`).
 - Nothing phones home. It starts and runs with no internet access.
 
 ## Install
@@ -232,6 +236,15 @@ change per commit, `make test lint` clean, Developer Certificate of
 Origin sign-off. Pull requests that add cryptographic code are declined
 on principle (ADR 0004). Report vulnerabilities privately as described
 in `SECURITY.md`, not in a public issue.
+
+Trust in Thawr is explicit. A device trusts the server it enrolled
+with (TLS fingerprint) and the WireGuard keys it saw first; after
+`thawr client rotate-key` on one device, every other device shows it as
+`key changed` and holds it until someone runs `thawr client trust
+<name>` there. Every control-plane change on the server lands in an
+audit log (`thawr admin audit`, the UI, `GET /api/v1/audit`), kept for
+`audit.retention_days`. `docs/THREAT_MODEL.md` says what this does and
+does not protect against.
 
 ## License
 
