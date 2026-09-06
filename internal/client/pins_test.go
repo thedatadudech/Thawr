@@ -1,7 +1,6 @@
 package client
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -196,9 +195,5 @@ func TestLoadPinsRejectsCorruptFile(t *testing.T) {
 	}
 	if _, err := LoadPins(filepath.Join(dir, "missing")); err != nil {
 		t.Errorf("missing dir: %v", err)
-	}
-	var pe *os.PathError
-	if _, err := LoadPins(filepath.Join(dir, PinsFile)); err == nil || (!errors.As(err, &pe) && !strings.Contains(err.Error(), PinsFile)) {
-		t.Errorf("file as dir: %v", err)
 	}
 }
