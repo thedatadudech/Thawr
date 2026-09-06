@@ -432,9 +432,16 @@ entry.
         netns integration tests compile and skip here (no `ip`); they
         run on the Linux VM. macOS, Windows and a real phone are on the
         manual checklist in TESTING.md.
-- [ ] **011 Signed netmaps, key pinning, audit log** — threat model T4
-      phase 2 items (spec to be written).
-- [ ] **012 Exit nodes and subnet routers** — advertised prefixes gated
+- [~] **011 Key pinning and audit log** — `docs/specs/011-key-pinning-and-audit-log.md`
+      Clients pin the hub key and every peer's `(id, key)` by name and
+      hold a changed key out of the tunnel until `thawr client trust`;
+      the server keeps an `audit_log` table of every control-plane
+      mutation with `thawr admin audit`, a REST endpoint and a UI
+      section (threat model T4 and T5).
+- [ ] **012 Network lock** — signed peer records with an admin-held
+      offline key (Ed25519), the third T4 phase-2 item; signed rotations
+      pass the 011 hold (spec to be written).
+- [ ] **013 Exit nodes and subnet routers** — advertised prefixes gated
       by policy (spec to be written).
 
 ## Phase 2 candidates (not scheduled)
