@@ -39,6 +39,10 @@ type Pins struct {
 	dir   string
 	hub   string
 	peers map[string]pinEntry
+	// dirty is set while the in-memory set is ahead of the file, so a
+	// failed write is retried on the next Apply instead of being lost
+	// at the next start.
+	dirty bool
 }
 
 // HeldStatus describes one netmap entry the client refuses to apply
@@ -151,10 +155,12 @@ func (p *Pins) Apply(nm NetMap, now time.Time, prev []HeldStatus) (NetMap, []Hel
 		held = append(held, HeldStatus{Name: peer.Name, IPv4: peer.IPv4, Kind: peer.Kind, Owner: peer.Owner, PinnedKey: pin.Key, OfferedKey: peer.PublicKey,
 			Since: since(peer.Name, peer.PublicKey), id: peer.ID})
 	}
-	if changed {
+	if changed || p.dirty {
+		p.dirty = true
 		if err := p.save(); err != nil {
 			return NetMap{}, nil, err
 		}
+		p.dirty = false
 	}
 	sort.Slice(held, func(i, j int) bool { return held[i].Name < held[j].Name })
 	return out, held, nil
@@ -167,7 +173,12 @@ func (p *Pins) Trust(h HeldStatus) error {
 	} else {
 		p.peers[h.Name] = pinEntry{ID: h.id, Key: h.OfferedKey}
 	}
-	return p.save()
+	p.dirty = true
+	if err := p.save(); err != nil {
+		return err
+	}
+	p.dirty = false
+	return nil
 }
 
 // hubAddr is the hub's overlay address as the netmap routes it.

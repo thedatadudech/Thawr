@@ -45,10 +45,11 @@ lives in `docs/`; the implementation follows one spec at a time from
   (nftables with kernel WireGuard, a userspace filter otherwise).
   `thawr admin policy check`, `reload` and `show` manage it live.
 - Phones use the official WireGuard app via a QR code.
-- Every device pins the keys it has seen: a peer whose key changes is
-  held out of the tunnel until you run `thawr client trust <name>`, so
-  a compromised server cannot silently swap a key. The server keeps an
-  audit log of every change (`thawr admin audit`).
+- Every device pins the hub's key and the key of every peer it reaches
+  directly: a key that changes is held out of the tunnel until you run
+  `thawr client trust <name>`, so a compromised server cannot silently
+  swap a key. Phones are reached through the hub, whose key is pinned.
+  The server keeps an audit log of every change (`thawr admin audit`).
 - Nothing phones home. It starts and runs with no internet access.
 
 ## Install

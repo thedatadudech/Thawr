@@ -35,6 +35,9 @@ type PolicyService struct {
 	path     string
 	notifier Notifier
 	audit    *Auditor
+	// reloadMu serialises Reload end to end: transaction, publication,
+	// notification and report, so two reloads cannot interleave.
+	reloadMu sync.Mutex
 
 	mu       sync.Mutex
 	current  *policy.Policy
@@ -85,6 +88,8 @@ func (s *PolicyService) LoadInitial(ctx context.Context) error {
 // filled; a valid one replaces it, bumps the netmap generation and
 // notifies the hub so every client gets a new map.
 func (s *PolicyService) Reload(ctx context.Context, by Principal) (PolicyReport, error) {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	p, err := policy.Load(s.path)
 	if err != nil {
 		return PolicyReport{Errors: errorLines(err)}, fmt.Errorf("%w: %w", ErrPolicyInvalid, err)
@@ -93,9 +98,9 @@ func (s *PolicyService) Reload(ctx context.Context, by Principal) (PolicyReport,
 	if err != nil {
 		return PolicyReport{Hash: p.Hash, Warnings: warnings, Errors: errorLines(err)}, fmt.Errorf("%w: %w", ErrPolicyInvalid, err)
 	}
-	s.mu.Lock()
-	s.current, s.warnings, s.compiled = p, warnings, nil
-	s.mu.Unlock()
+	// The generation bump and the audit row commit first; the policy is
+	// published only then, so a failed transaction leaves the previous
+	// policy in force, as the caller's log line says.
 	if err := s.store.InTx(ctx, func(tx *store.Store) error {
 		if _, err := tx.Meta().IncrementGeneration(ctx); err != nil {
 			return err
@@ -104,6 +109,9 @@ func (s *PolicyService) Reload(ctx context.Context, by Principal) (PolicyReport,
 	}); err != nil {
 		return PolicyReport{}, fmt.Errorf("control: bump generation after policy reload: %w", err)
 	}
+	s.mu.Lock()
+	s.current, s.warnings, s.compiled = p, warnings, nil
+	s.mu.Unlock()
 	if s.notifier != nil {
 		s.notifier.Changed()
 	}

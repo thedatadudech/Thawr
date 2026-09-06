@@ -64,9 +64,9 @@ func NewUsers(st *store.Store, now func() time.Time, log *slog.Logger) (*Users, 
 	}, nil
 }
 
-// Create adds a user. The password is hashed with argon2id and never
-// stored or logged in clear.
-func (u *Users) Create(ctx context.Context, name, role, password string) (store.User, error) {
+// Create adds a user on behalf of by, which the audit row names. The
+// password is hashed with argon2id and never stored or logged in clear.
+func (u *Users) Create(ctx context.Context, by Principal, name, role, password string) (store.User, error) {
 	if !validLabel(name) {
 		return store.User{}, fmt.Errorf("%w: name %q must be 1-63 lowercase letters, digits or hyphens", ErrValidation, name)
 	}
@@ -89,7 +89,7 @@ func (u *Users) Create(ctx context.Context, name, role, password string) (store.
 		if err := tx.Users().Create(ctx, user); err != nil {
 			return err
 		}
-		return u.audit.Record(ctx, tx, LocalAdmin, AuditUserCreate, user.ID, map[string]string{"name": name, "role": role})
+		return u.audit.Record(ctx, tx, by, AuditUserCreate, user.ID, map[string]string{"name": name, "role": role})
 	})
 	if err != nil {
 		return store.User{}, err

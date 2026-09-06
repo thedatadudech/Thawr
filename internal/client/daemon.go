@@ -494,9 +494,38 @@ func (d *Daemon) logHeld(prev, now []HeldStatus) {
 // every one, HubName for the hub) and re-applies the last netmap.
 // ErrNotHeld names an entry that is not held.
 func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error) {
+	// Selection, pinning and the snapshot of the netmap to re-apply
+	// happen under one lock hold, so a netmap arriving in between
+	// cannot make Trust pin a key the server no longer offers or
+	// reconfigure the device from a stale generation.
 	d.mu.Lock()
-	held, offered := d.held, d.offered
+	accept, err := selectHeld(d.held, names)
+	if err != nil {
+		d.mu.Unlock()
+		return nil, err
+	}
+	for _, h := range accept {
+		if err = d.pins.Trust(h); err != nil {
+			break
+		}
+		d.log.Info("key trusted", "peer", h.Name, "was", fingerprintOf(h.PinnedKey), "now", fingerprintOf(h.OfferedKey))
+	}
+	offered := d.offered
 	d.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if offered != nil {
+		if err := d.apply(ctx, *offered, false); err != nil {
+			return nil, err
+		}
+	}
+	return accept, nil
+}
+
+// selectHeld resolves names ("all", or held names with an optional
+// zone suffix) against the held list.
+func selectHeld(held []HeldStatus, names []string) ([]HeldStatus, error) {
 	var accept []HeldStatus
 	for _, name := range names {
 		name = stripZone(name)
@@ -512,23 +541,6 @@ func (d *Daemon) Trust(ctx context.Context, names []string) ([]HeldStatus, error
 	}
 	if len(accept) == 0 {
 		return nil, fmt.Errorf("%w: no key is held", ErrNotHeld)
-	}
-	d.mu.Lock()
-	var err error
-	for _, h := range accept {
-		if err = d.pins.Trust(h); err != nil {
-			break
-		}
-		d.log.Info("key trusted", "peer", h.Name, "was", fingerprintOf(h.PinnedKey), "now", fingerprintOf(h.OfferedKey))
-	}
-	d.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	if offered != nil {
-		if err := d.apply(ctx, *offered, false); err != nil {
-			return nil, err
-		}
 	}
 	return accept, nil
 }

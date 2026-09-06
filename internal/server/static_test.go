@@ -94,7 +94,7 @@ func TestStaticPresence(t *testing.T) {
 // mustAdmin creates the admin user "markus" on a running harness.
 func mustAdmin(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.srv.users.Create(context.Background(), "markus", store.RoleAdmin, "adminpassword"); err != nil {
+	if _, err := h.srv.users.Create(context.Background(), control.LocalAdmin, "markus", store.RoleAdmin, "adminpassword"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -197,6 +197,12 @@ func TestAuditConfig(t *testing.T) {
 	if _, err := Parse([]byte("public_addr: a\naudit:\n  retention_days: -1\n"), noEnv); err == nil || !strings.Contains(err.Error(), "audit.retention_days") {
 		t.Errorf("negative retention accepted: %v", err)
 	}
+	if cfg, err := Parse([]byte("public_addr: a\naudit:\n  retention_days: 106751\n"), noEnv); err != nil || cfg.Audit.RetentionDays != MaxAuditRetentionDays {
+		t.Errorf("maximum retention rejected: %v", err)
+	}
+	if _, err := Parse([]byte("public_addr: a\naudit:\n  retention_days: 106752\n"), noEnv); err == nil || !strings.Contains(err.Error(), "exceeds the maximum") {
+		t.Errorf("overflowing retention accepted: %v", err)
+	}
 }
 
 func TestParseResolvConf(t *testing.T) {

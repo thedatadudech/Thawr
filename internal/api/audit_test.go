@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ func TestAuditEndpoint(t *testing.T) {
 	env := newRESTEnv(t, func(d *RESTDeps, e *restEnv) {
 		d.Audit = e.st.Audit()
 		d.Now = func() time.Time { return now }
+		e.users.WithAuditor(control.NewAuditor(func() time.Time { return now }))
 	})
 	ctx := context.Background()
 	// The env's users were created without an auditor; seed rows directly.
@@ -49,10 +51,13 @@ func TestAuditEndpoint(t *testing.T) {
 		return out, rec.Code
 	}
 	all, code := list(env.handler, admin, "")
-	// The two logins above were recorded by the env's own users service
-	// only when it carries an auditor; count what was seeded plus those.
-	if code != http.StatusOK || len(all) < 3 || all[len(all)-1].Action != control.AuditTokenCreate || all[len(all)-1].Details["owner"] != "alice" {
+	// The env's users service carries an auditor, so the two users and
+	// the two logins above are rows of their own next to the seeded ones.
+	if code != http.StatusOK || len(all) < 7 || all[0].Action != control.AuditLoginOK {
 		t.Fatalf("admin list: %d %+v", code, all)
+	}
+	if i := slices.IndexFunc(all, func(v auditView) bool { return v.Action == control.AuditTokenCreate }); i < 0 || all[i].Details["owner"] != "alice" {
+		t.Errorf("seeded token.create row: %+v", all)
 	}
 	if got, _ := list(env.handler, admin, "?action=peer.rotate_key"); len(got) != 1 || got[0].Actor != "peer:nas" || got[0].ActorRole != control.RolePeer {
 		t.Errorf("action filter: %+v", got)
@@ -76,6 +81,14 @@ func TestAuditEndpoint(t *testing.T) {
 		if _, code := list(env.handler, admin, bad); code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
+	}
+	// A user created over HTTPS is attributed to the session's user, not
+	// to the admin socket.
+	if rec := env.do(env.handler, admin, http.MethodPost, "/api/v1/users", map[string]string{"name": "bob", "role": "member", "password": "bobpassword1"}, true); rec.Code != http.StatusCreated {
+		t.Fatalf("create user: %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := list(env.handler, admin, "?action=user.create&actor=markus"); len(got) != 1 || got[0].ActorRole != store.RoleAdmin || got[0].Details["name"] != "bob" {
+		t.Errorf("user.create actor: %+v", got)
 	}
 	// The admin socket needs no session.
 	if got, code := list(env.local, session{}, "?action=token.create"); code != http.StatusOK || len(got) != 1 {

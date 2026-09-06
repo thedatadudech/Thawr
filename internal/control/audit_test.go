@@ -212,3 +212,81 @@ func TestNilAuditorRecordsNothing(t *testing.T) {
 }
 
 func netipPrefix(s string) netip.Prefix { return netip.MustParsePrefix(s) }
+
+// TestPolicyReloadAuditFailureKeepsOldPolicy: when the audit row cannot
+// be written the reload fails and the previous policy stays in force,
+// with the generation unchanged.
+func TestPolicyReloadAuditFailureKeepsOldPolicy(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "t.db")
+	st, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	policyPath := filepath.Join(t.TempDir(), "policy.yaml")
+	write(t, policyPath, "version: 1\nacls:\n  - action: accept\n    src: ['*']\n    dst: ['*:*']\n")
+	svc := NewPolicyService(st, quietLogger(), policyPath, nil).WithAuditor(NewAuditor(newClock().Now))
+	if err := svc.LoadInitial(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := svc.Current().Hash
+	gen0, _ := st.Meta().Generation(ctx)
+
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err := raw.ExecContext(ctx, `DROP TABLE audit_log`); err != nil {
+		t.Fatal(err)
+	}
+	write(t, policyPath, "version: 1\nacls: []\n")
+	if _, err := svc.Reload(ctx, LocalAdmin); err == nil {
+		t.Fatal("reload succeeded without an audit table")
+	}
+	if svc.Current().Hash != before || len(svc.Current().ACLs) != 1 {
+		t.Errorf("new policy published despite the failed transaction: %+v", svc.Current())
+	}
+	if gen, _ := st.Meta().Generation(ctx); gen != gen0 {
+		t.Errorf("generation advanced on a failed reload: %d -> %d", gen0, gen)
+	}
+}
+
+// TestPolicyReloadConcurrent: parallel reloads are serialised; every one
+// commits its generation bump and audit row.
+func TestPolicyReloadConcurrent(t *testing.T) {
+	env := auditEnv(t)
+	ctx := context.Background()
+	policyPath := filepath.Join(t.TempDir(), "policy.yaml")
+	write(t, policyPath, "version: 1\nacls:\n  - action: accept\n    src: ['*']\n    dst: ['*:*']\n")
+	notify := &policyNotifier{}
+	svc := NewPolicyService(env.st, quietLogger(), policyPath, notify).WithAuditor(NewAuditor(env.clk.Now))
+	if err := svc.LoadInitial(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gen0, _ := env.st.Meta().Generation(ctx)
+	const n = 8
+	errs := make(chan error, n)
+	for range n {
+		go func() {
+			_, err := svc.Reload(ctx, env.admin)
+			errs <- err
+		}()
+	}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Errorf("reload: %v", err)
+		}
+	}
+	if gen, _ := env.st.Meta().Generation(ctx); gen != gen0+n {
+		t.Errorf("generation: %d, want %d", gen, gen0+n)
+	}
+	rows, err := env.st.Audit().List(ctx, store.AuditQuery{Action: AuditPolicyReload})
+	if err != nil || len(rows) != n || rows[0].Actor != "markus" {
+		t.Errorf("audit rows: %d %v", len(rows), err)
+	}
+	if notify.n != n {
+		t.Errorf("notifications: %d, want %d", notify.n, n)
+	}
+}

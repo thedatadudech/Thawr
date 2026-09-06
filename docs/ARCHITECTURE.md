@@ -194,8 +194,8 @@ peer, no filter rule, no `<name>.thawr` and no path probing until
 the offered key. A changed hub key holds the hub the same way; direct
 mesh paths and the TLS-pinned control connection are unaffected. The
 client then turns what passed into the complete WireGuard configuration
-and applies it (adapters replace the peer set; WireGuard keeps sessions
-for unchanged keys), caches the netmap as received on disk (held
+and applies it (adapters diff peers in place, so WireGuard keeps
+sessions for unchanged keys), caches the netmap as received on disk (held
 entries are derived again from the pins on the next start), and
 installs the filter (spec 006). A peer is online while its `Sync` stream is open and for 90 s
 after it drops. Removing a peer on the server propagates to every

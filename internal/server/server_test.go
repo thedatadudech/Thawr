@@ -577,7 +577,7 @@ func TestAuditOverAdminSocket(t *testing.T) {
 	h.start(t)
 	defer h.stop(t)
 	ctx := context.Background()
-	if _, err := h.srv.users.Create(ctx, "markus", "admin", "adminpassword"); err != nil {
+	if _, err := h.srv.users.Create(ctx, control.LocalAdmin, "markus", "admin", "adminpassword"); err != nil {
 		t.Fatal(err)
 	}
 	tok, err := h.srv.tokens.Create(ctx, control.LocalAdmin, control.TokenRequest{OwnerName: "markus", Kind: "human"})

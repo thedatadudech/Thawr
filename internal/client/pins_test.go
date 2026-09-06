@@ -197,3 +197,35 @@ func TestLoadPinsRejectsCorruptFile(t *testing.T) {
 		t.Errorf("missing dir: %v", err)
 	}
 }
+
+// TestPinsRetryFailedSave: a pin write that fails is retried on the next
+// Apply even when that netmap changes nothing, so a restart never
+// re-pins what the file lost.
+func TestPinsRetryFailedSave(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadPins(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.dir = filepath.Join(blocker, "pins") // a directory under a regular file cannot be created
+	hub := testKey(t)
+	nas := Peer{ID: "p1", Name: "nas", IPv4: "100.64.0.3", PublicKey: testKey(t)}
+	if _, _, err := p.Apply(pinNetMap(hub, nas), time.Now(), nil); err == nil {
+		t.Fatal("save under a regular file succeeded")
+	}
+	if !p.dirty {
+		t.Fatal("failed save did not mark the pins dirty")
+	}
+	p.dir = dir
+	if _, held, err := p.Apply(pinNetMap(hub, nas), time.Now(), nil); err != nil || len(held) != 0 || p.dirty {
+		t.Fatalf("retry: held=%v dirty=%v err=%v", held, p.dirty, err)
+	}
+	again, err := LoadPins(dir)
+	if err != nil || again.hub != hub || again.peers["nas"].ID != "p1" {
+		t.Errorf("pins not persisted on retry: %+v %v", again, err)
+	}
+}

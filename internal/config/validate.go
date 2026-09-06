@@ -74,6 +74,8 @@ func (c *Config) Validate() error {
 	}
 	if c.Audit.RetentionDays < 0 {
 		add("audit.retention_days: must not be negative (0 keeps entries forever)")
+	} else if c.Audit.RetentionDays > MaxAuditRetentionDays {
+		add("audit.retention_days: %d exceeds the maximum of %d", c.Audit.RetentionDays, MaxAuditRetentionDays)
 	}
 	if c.Overlay.Interface == "" || len(c.Overlay.Interface) > 15 || strings.ContainsAny(c.Overlay.Interface, " /") {
 		add("overlay.interface: %q must be 1-15 characters without spaces or slashes", c.Overlay.Interface)

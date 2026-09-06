@@ -110,11 +110,12 @@ Attacker has root on the server host or a copy of `data_dir`.
 
 Out of scope for enforcement; the design limits blast radius: admins see
 public keys, not private keys; token secrets are shown once; every admin
-action is logged with user and peer id at `info` and recorded in the
-`audit_log` table (spec 011: tokens, enrolments, static peers, renames,
-deletions, key rotations, user creation, logins, policy reloads, with
-the acting user, socket or peer, and key fingerprints instead of keys),
-kept for `audit.retention_days` and listed with `thawr admin audit`,
+action is logged at `info` and recorded in the `audit_log` table (spec
+011: tokens, enrolments, static peers, renames, deletions, key
+rotations, user creation, logins, policy reloads), each row naming the
+actor (a user, the admin socket, or the peer acting for itself) and the
+target (a peer, token or user id, or the policy file) with key
+fingerprints instead of keys, kept for `audit.retention_days` and listed with `thawr admin audit`,
 `GET /api/v1/audit` and the UI. The log lives in the same database as
 everything else: an admin with shell access to the server can edit it,
 so it reconstructs what happened through the API, not what root did.

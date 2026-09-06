@@ -37,8 +37,12 @@ type Audit struct {
 	RetentionDays int `yaml:"retention_days"`
 }
 
-// DefaultAuditRetentionDays is the default audit retention.
-const DefaultAuditRetentionDays = 90
+// Audit retention bounds: the default, and the largest day count whose
+// duration still fits time.Duration.
+const (
+	DefaultAuditRetentionDays = 90
+	MaxAuditRetentionDays     = 106751
+)
 
 // DNS configures the hub resolver: <name>.thawr for phones and any
 // peer that asks the hub address (spec 010).

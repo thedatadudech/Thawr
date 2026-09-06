@@ -67,7 +67,7 @@ func newControlPlane(t *testing.T, mods ...func(*cpOptions)) *controlPlane {
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin, err := users.Create(ctx, "markus", store.RoleAdmin, "adminpassword")
+	admin, err := users.Create(ctx, control.LocalAdmin, "markus", store.RoleAdmin, "adminpassword")
 	if err != nil {
 		t.Fatal(err)
 	}

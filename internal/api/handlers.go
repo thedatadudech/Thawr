@@ -22,7 +22,7 @@ const (
 
 // UsersService is what the REST layer needs from control.Users.
 type UsersService interface {
-	Create(ctx context.Context, name, role, password string) (store.User, error)
+	Create(ctx context.Context, by control.Principal, name, role, password string) (store.User, error)
 	List(ctx context.Context) ([]store.User, error)
 	Get(ctx context.Context, id string) (store.User, error)
 }
@@ -140,7 +140,8 @@ func (h *rest) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	u, err := h.deps.Users.Create(r.Context(), body.Name, body.Role, body.Password)
+	by, _ := principalFrom(r.Context())
+	u, err := h.deps.Users.Create(r.Context(), by, body.Name, body.Role, body.Password)
 	if err != nil {
 		h.writeControlError(w, err)
 		return
